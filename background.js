@@ -21,7 +21,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
 
   if (msg.action === 'startRelist') {
-    startRelistFlow();
+    startRelistFlow(msg.selectedIds || null);
     sendResponse({ started: true });
     return false;
   }
@@ -73,7 +73,8 @@ chrome.alarms.onAlarm.addListener(alarm => {
   }
 });
 
-async function startRelistFlow() {
+async function startRelistFlow(selectedIds) {
+  const extra = selectedIds && selectedIds.length > 0 ? { selectedIds } : { selectedIds: null };
   await chrome.storage.local.set({
     relistPending: true,
     relistState: 'scraping',
@@ -81,6 +82,7 @@ async function startRelistFlow() {
     progressDone: 0,
     progressTotal: 0,
     status: 'Starting relist flow...',
+    ...extra,
   });
 
   const tabs = await chrome.tabs.query({ url: '*://*.facebook.com/marketplace/*' });

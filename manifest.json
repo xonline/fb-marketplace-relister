@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "FB Marketplace Relister",
-  "version": "1.2.1",
+  "version": "1.6.0",
   "description": "Automatically relists Facebook Marketplace items to keep them fresh.",
   "permissions": [
     "storage",
@@ -17,6 +17,12 @@
     "service_worker": "background.js"
   },
   "content_scripts": [
+    {
+      "matches": ["*://www.facebook.com/marketplace/*"],
+      "js": ["hook.js"],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
     {
       "matches": ["*://www.facebook.com/marketplace/*"],
       "js": ["utils.js", "drop_img.js", "content.js"],

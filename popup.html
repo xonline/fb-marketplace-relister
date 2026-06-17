@@ -107,6 +107,35 @@
       padding: 7px;
     }
 
+    #btn-relist-selected {
+      background: #1877f2;
+      color: #fff;
+    }
+
+    .listing-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+      color: #e4e6ea;
+      cursor: pointer;
+      padding: 3px 0;
+    }
+
+    .listing-item input[type="checkbox"] {
+      width: 15px;
+      height: 15px;
+      cursor: pointer;
+      flex-shrink: 0;
+      accent-color: #1877f2;
+    }
+
+    .listing-item span {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
     .schedule-section { margin-top: 4px; }
 
     .schedule-row {
@@ -169,8 +198,20 @@
     <div class="progress-label" id="progress-label"></div>
   </div>
 
+  <button id="btn-scan">Scan to Select Listings</button>
+
+  <div id="listings-section" style="display:none;">
+    <div class="card" style="padding:8px 12px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+        <div class="label" style="margin:0;">Select to relist</div>
+        <button id="btn-toggle-all" style="width:auto;padding:3px 10px;font-size:11px;margin:0;background:#3a3b3c;color:#b0b3b8;">All</button>
+      </div>
+      <div id="listings-checkboxes" style="max-height:160px;overflow-y:auto;display:flex;flex-direction:column;gap:6px;"></div>
+    </div>
+    <button id="btn-relist-selected">Relist Selected</button>
+  </div>
+
   <button id="btn-relist">Relist All Now</button>
-  <button id="btn-scan">Scan Listings (Debug)</button>
   <button id="btn-cancel">Cancel</button>
 
   <div class="divider"></div>

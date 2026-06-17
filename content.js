@@ -2,25 +2,45 @@
 // State machine: state persisted in chrome.storage.local survives page navigations.
 // States: 'scraping' (selling page) → 'deleting' (selling page) → 'creating' (create page)
 // Depends on: utils.js, drop_img.js
+// NOTE: fetch/XHR interception is done by hook.js running in MAIN world (not isolated world).
+//       hook.js relays intercepted GraphQL responses via window.postMessage({ __fbRelister: 'graphql', text }).
 
 const SELLING_URL = 'https://www.facebook.com/marketplace/you/selling?state=LIVE&status[0]=IN_STOCK';
 
-// Install fetch hook immediately — injected at document_start so this runs
-// before Facebook fires its initial GraphQL requests on page load.
-installFetchHook();
+// ─── Inbound message handler ──────────────────────────────────────────────────
+// hook.js (MAIN world) posts { __fbRelister: 'graphql', text } for every /api/graphql
+// response that contains marketplace/listing data. We parse and store it.
+window.addEventListener('message', event => {
+  if (!event.data || event.data.__fbRelister !== 'graphql') return;
+  try { parseAndStoreListings(event.data.text); } catch (e) { console.warn('[Relister] parse error:', e); }
+});
 
 // Debug: respond to scan-only requests from the popup
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.action === 'scanOnly') {
     const listings = scrapeListingsFromDOM();
-    const allLinks = Array.from(document.querySelectorAll('a[href*="marketplace"]'));
-    // Return first 6 hrefs so we can see the actual URL pattern
-    const sampleHrefs = allLinks.slice(0, 6).map(l => l.href);
+    // Diagnostic: count action buttons that indicate listing cards
+    const LISTING_ACTIONS = ['Boost listing', 'Mark as sold', 'Mark as available', 'Relist'];
+    const clickables = Array.from(document.querySelectorAll('[role="button"], button, a'));
+    const actionBtns = clickables.filter(el => {
+      const text = (el.textContent || '').trim();
+      const label = el.getAttribute('aria-label') || '';
+      return LISTING_ACTIONS.some(t => text === t || label.includes(t));
+    });
+    const allLinks = Array.from(document.querySelectorAll('a[href]'));
+    const numericLinks = allLinks.filter(l => /\/marketplace\/item\/\d+/.test(l.pathname || l.href));
+    const msgLinks = allLinks.filter(l => (l.pathname || '').startsWith('/messages/'));
+    const sampleBtns = actionBtns.slice(0, 5).map(el => (el.textContent || '').trim());
     sendResponse({
       count: listings.length,
+      listings: listings.map(l => ({ id: l.id, title: l.title, price: l.price })),
       titles: listings.map(l => l.title),
-      linksChecked: allLinks.length,
-      sampleHrefs,
+      actionButtons: actionBtns.length,
+      sampleActionButtons: sampleBtns,
+      totalLinks: allLinks.length,
+      numericLinks: numericLinks.length,
+      messengerLinks: msgLinks.length,
+      sampleHrefs: numericLinks.slice(0, 5).map(l => l.href),
     });
     return true;
   }
@@ -60,18 +80,23 @@ async function runScraping() {
   await chrome.storage.local.set({ listings: [] });
   setStatus('Scanning your listings...');
 
-  // Scroll to trigger lazy-loaded cards
+  // Scroll to trigger FB's lazy-loaded cards — this causes FB's React app to fire
+  // its own GraphQL requests, which hook.js intercepts and stores via parseAndStoreListings.
   for (let i = 0; i < 3; i++) {
     window.scrollBy(0, window.innerHeight);
-    await sleep(600);
+    await sleep(800);
   }
   await sleep(500);
   window.scrollTo(0, 0);
 
-  // 1. Try API intercept (fetch + XHR hooks installed at document_start)
-  let listings = await waitForListings(8000);
+  let listings = null;
 
-  // 2. Fallback: DOM scraping — works regardless of API structure
+  // 1. Wait for hook.js to relay FB's own GraphQL selling-feed response.
+  //    hook.js intercepts FB's real GraphQL calls which have auth baked in.
+  setStatus('Waiting for listing data...');
+  listings = await waitForListings(10000);
+
+  // 2. DOM scraping fallback — if GraphQL intercept missed or returned nothing.
   if (!listings || listings.length === 0) {
     setStatus('Trying DOM scan...');
     await sleep(1000);
@@ -87,7 +112,21 @@ async function runScraping() {
     return;
   }
 
-  setStatus(`Found ${listings.length} listing(s). Starting relist...`);
+  // Filter to selected listings if user chose "Relist Selected"
+  const { selectedIds } = await chrome.storage.local.get(['selectedIds']);
+  if (selectedIds && selectedIds.length > 0) {
+    const idSet = new Set(selectedIds.map(String));
+    listings = listings.filter(l => idSet.has(String(l.id)));
+    console.log(`[Relister] Filtered to ${listings.length} selected listing(s)`);
+  }
+
+  if (!listings || listings.length === 0) {
+    setStatus('None of the selected listings were found on this page.');
+    await chrome.storage.local.set({ relistPending: false, relistState: null });
+    return;
+  }
+
+  setStatus(`Relisting ${listings.length} listing(s)...`);
   setProgress(0, listings.length);
   await chrome.storage.local.set({ listings, currentIndex: 0, relistState: 'deleting' });
   await runDeleting();
@@ -97,56 +136,150 @@ function scrapeListingsFromDOM() {
   const seen = new Set();
   const listings = [];
 
-  // Collect candidate links — cover all URL patterns FB uses for marketplace listings:
-  // /marketplace/item/ID/          (public view)
-  // /marketplace/listing/ID/       (seller view)
-  // /marketplace/listing/ID/edit/  (edit view, most common on the selling page)
-  const candidateLinks = new Set();
-  for (const sel of [
-    'a[href*="/marketplace/item/"]',
-    'a[href*="/marketplace/listing/"]',
-  ]) {
-    document.querySelectorAll(sel).forEach(l => candidateLinks.add(l));
+  // Strategy A: Find listing cards via their unique action buttons.
+  // "Boost listing", "Mark as sold", "Mark as available" ONLY appear on listing cards —
+  // never in Messenger threads, profile pages, or navigation. This prevents us from
+  // accidentally targeting chat contacts or friend names like previous versions did.
+  const LISTING_ACTIONS = ['Boost listing', 'Mark as sold', 'Mark as available', 'Relist'];
+  const cardRoots = new Set();
+
+  const clickables = Array.from(document.querySelectorAll('[role="button"], button, a'));
+  for (const el of clickables) {
+    const text = (el.textContent || '').trim();
+    const label = el.getAttribute('aria-label') || '';
+    if (!LISTING_ACTIONS.some(t => text === t || label.includes(t))) continue;
+
+    // Walk up to find a semantic listing card container
+    let node = el.parentElement;
+    let found = false;
+    for (let depth = 0; depth < 12 && node; depth++) {
+      const role = node.getAttribute('role');
+      if (role === 'listitem' || role === 'article') {
+        cardRoots.add(node);
+        found = true;
+        break;
+      }
+      if (depth > 0 && node.hasAttribute('data-testid')) {
+        cardRoots.add(node);
+        found = true;
+        break;
+      }
+      if (role === 'feed' || role === 'list' || role === 'main' || role === 'navigation') break;
+      node = node.parentElement;
+    }
+    // Fallback: 8 levels up if no semantic container found
+    if (!found) {
+      let n = el;
+      for (let i = 0; i < 8 && n.parentElement; i++) n = n.parentElement;
+      cardRoots.add(n);
+    }
   }
-  // Broader fallback: any <a> with "marketplace" in href containing a long numeric ID
-  document.querySelectorAll('a[href*="marketplace"]').forEach(l => {
-    if (/\/\d{8,}/.test(l.href)) candidateLinks.add(l);
-  });
 
-  console.log(`[Relister] DOM scan — candidate links found: ${candidateLinks.size}`);
+  console.log(`[Relister] DOM strategy A — listing card candidates via buttons: ${cardRoots.size}`);
 
-  for (const link of candidateLinks) {
-    // Extract ID from /marketplace/item/ID or /marketplace/listing/ID
-    const match = link.href.match(/\/marketplace\/(?:item|listing)\/(\d+)/);
-    if (!match) continue;
-    const id = match[1];
-    if (seen.has(id)) continue;
-    seen.add(id);
+  const SKIP_WORDS = new Set([
+    'Active', 'Sold', 'Available', 'Pending', 'In stock',
+    'Boost listing', 'Mark as sold', 'Mark as available', 'Relist',
+    'Share', 'Edit', 'Delete', 'More', 'See more',
+  ]);
 
-    const img = link.querySelector('img');
-    const photoUrls = img && img.src ? [img.src] : [];
-
-    // Collect all visible text inside the card
+  for (const card of cardRoots) {
     const allText = [];
-    const walker = document.createTreeWalker(link, NodeFilter.SHOW_TEXT, null);
-    let node;
-    while ((node = walker.nextNode())) {
-      const t = node.textContent.trim();
-      if (t) allText.push(t);
+    const walker = document.createTreeWalker(card, NodeFilter.SHOW_TEXT, null);
+    let n;
+    while ((n = walker.nextNode())) {
+      const t = (n.textContent || '').trim();
+      if (t && t.length > 1) allText.push(t);
     }
 
-    const price = allText.find(t => /^\$[\d,]+|^AU\$[\d,]+/.test(t)) || '';
-    const skip = new Set(['Active', 'Sold', 'Available', 'Pending', 'In stock', price]);
+    const price = allText.find(t => /^A?\$[\d,]+$|^\$[\d,]+$/.test(t)) || '';
+    const skip = new Set([...SKIP_WORDS, price]);
+
     const title = allText
-      .filter(t => t.length > 2 && !skip.has(t))
+      .filter(t => t.length > 3 && !skip.has(t) && !/^[\d,\.\$]+$/.test(t))
       .sort((a, b) => b.length - a.length)[0] || '';
 
-    if (id && title) {
+    if (!title || seen.has(title)) continue;
+    seen.add(title);
+
+    // Try to extract a numeric listing ID from links inside the card.
+    // Exclude /messages/ and /groups/ paths (those are NOT listing IDs).
+    let id = '';
+    for (const link of card.querySelectorAll('a[href]')) {
+      const path = link.pathname || '';
+      if (path.startsWith('/messages/') || path.startsWith('/groups/')) continue;
+      const m = path.match(/\/(\d{13,})/);
+      if (m) { id = m[1]; break; }
+    }
+    if (!id) id = title; // use title as dedup key if no numeric ID found
+
+    const photoUrls = Array.from(card.querySelectorAll('img[src]'))
+      .map(img => img.src)
+      .filter(src => src && src.startsWith('http') && !src.includes('static.xx'));
+
+    listings.push({ id, title, price, description: '', photoUrls, categoryName: '', condition: '' });
+  }
+
+  // Strategy B: link-based scan — same approach as before but with Messenger excluded.
+  // Used as a fallback if no action buttons are found (e.g. on a cached/partial page load).
+  if (listings.length === 0) {
+    console.log('[Relister] Strategy A found nothing — trying marketplace item link scan...');
+    const candidateLinks = new Set();
+    document.querySelectorAll('a[href]').forEach(l => {
+      const path = l.pathname || '';
+      // Only match /marketplace/item/<id> — the canonical URL for any listing
+      if (/\/marketplace\/item\/\d+/.test(path)) {
+        candidateLinks.add(l);
+      }
+    });
+
+    console.log(`[Relister] Strategy B — marketplace item links: ${candidateLinks.size}`);
+
+    for (const link of candidateLinks) {
+      const path = link.pathname || link.href;
+      const match = path.match(/\/marketplace\/item\/(\d+)/);
+      if (!match) continue;
+      const id = match[1];
+      if (seen.has(id)) continue;
+
+      const allText = [];
+      const walker = document.createTreeWalker(link, NodeFilter.SHOW_TEXT, null);
+      let n;
+      while ((n = walker.nextNode())) {
+        const t = (n.textContent || '').trim();
+        if (t) allText.push(t);
+      }
+
+      const price = allText.find(t => /^A?\$[\d,]+$|^\$[\d,]+$/.test(t)) || '';
+      const skip = new Set([...SKIP_WORDS, price]);
+      const title = allText
+        .filter(t => t.length > 2 && !skip.has(t))
+        .sort((a, b) => b.length - a.length)[0] || '';
+
+      if (!title) continue;
+      if (seen.has(title)) continue;
+      seen.add(id);
+      seen.add(title);
+
+      const img = link.querySelector('img');
+      const photoUrls = img && img.src ? [img.src] : [];
+
       listings.push({ id, title, price, description: '', photoUrls, categoryName: '', condition: '' });
     }
   }
 
-  console.log(`[Relister] DOM scan found ${listings.length} listings`, listings.map(l => `${l.id}:${l.title}`));
+  // Strategy C: Parse embedded <script> JSON blocks (unchanged).
+  if (listings.length === 0) {
+    document.querySelectorAll('script[type="application/json"], script:not([src])').forEach(s => {
+      const t = s.textContent;
+      if (t && (t.includes('"marketplace"') || t.includes('"listing"')) && t.length > 500) {
+        try { parseAndStoreListings(t); } catch { /* skip */ }
+      }
+    });
+    console.log('[Relister] Strategy C — script-tag extraction attempted');
+  }
+
+  console.log(`[Relister] DOM scan found ${listings.length} listings`);
   return listings;
 }
 
@@ -239,56 +372,9 @@ async function runCreating() {
   window.location.href = 'https://www.facebook.com/marketplace/you/selling';
 }
 
-// ─── GraphQL Intercept ────────────────────────────────────────────────────────
-
-function installFetchHook() {
-  if (window.__fbRelisterHooked) return;
-  window.__fbRelisterHooked = true;
-
-  // Hook fetch — Facebook calls fetch('/api/graphql', ...) with a relative URL,
-  // so check the path only, not the full domain.
-  const originalFetch = window.fetch;
-  window.fetch = async function (...args) {
-    const response = await originalFetch.apply(this, args);
-    const url = typeof args[0] === 'string' ? args[0] : (args[0] && args[0].url) || '';
-    if (url.includes('/api/graphql') || url.includes('graphql')) {
-      const clone = response.clone();
-      clone.text().then(text => {
-        if (text.includes('marketplace') || text.includes('listing')) {
-          console.log('[Relister] GraphQL (fetch) response captured');
-          try { parseAndStoreListings(text); } catch (e) { console.warn('[Relister] parse error:', e); }
-        }
-      }).catch(() => {});
-    }
-    return response;
-  };
-
-  // Also hook XHR — Facebook uses both fetch and XHR for GraphQL in different flows.
-  const OrigXHR = window.XMLHttpRequest;
-  function PatchedXHR() {
-    const xhr = new OrigXHR();
-    let capturedUrl = '';
-    const origOpen = xhr.open.bind(xhr);
-    xhr.open = function (method, url) {
-      capturedUrl = String(url);
-      return origOpen.apply(this, arguments);
-    };
-    xhr.addEventListener('load', function () {
-      if (capturedUrl.includes('/api/graphql') || capturedUrl.includes('graphql')) {
-        const text = xhr.responseText || '';
-        if (text.includes('marketplace') || text.includes('listing')) {
-          console.log('[Relister] GraphQL (XHR) response captured');
-          try { parseAndStoreListings(text); } catch (e) {}
-        }
-      }
-    });
-    return xhr;
-  }
-  PatchedXHR.prototype = OrigXHR.prototype;
-  window.XMLHttpRequest = PatchedXHR;
-
-  console.log('[Relister] fetch + XHR hooks installed');
-}
+// ─── GraphQL Parsing ──────────────────────────────────────────────────────────
+// Data arrives here via window.postMessage from hook.js (main world) or from
+// script-tag extraction in scrapeListingsFromDOM().
 
 function parseAndStoreListings(text) {
   // Facebook uses NDJSON (newline-delimited) or single-object JSON
@@ -308,7 +394,13 @@ function parseAndStoreListings(text) {
                || deepGet(json, ['data', 'marketplace_selling_feed', 'edges'])
                || deepGet(json, ['data', 'selling_feed_one_page', 'edges']);
 
-    if (!Array.isArray(edges) || edges.length === 0) continue;
+    if (!Array.isArray(edges) || edges.length === 0) {
+      // Log top-level keys to help diagnose the JSON structure when edges aren't found
+      if (json && json.data) {
+        console.log('[Relister] GraphQL data keys:', Object.keys(json.data).slice(0, 10).join(', '));
+      }
+      continue;
+    }
 
     const listings = edges.map(edge => {
       const node = edge.node || {};
@@ -375,6 +467,10 @@ function parseAndStoreListings(text) {
 function deepGet(obj, keys) {
   return keys.reduce((acc, key) => (acc && acc[key] !== undefined ? acc[key] : undefined), obj);
 }
+
+// ─── Active GraphQL API helpers ───────────────────────────────────────────────
+// These run in the isolated content-script world but relay requests through hook.js
+// in MAIN world (which has page cookies + page context).
 
 function waitForListings(timeoutMs) {
   return new Promise(resolve => {
