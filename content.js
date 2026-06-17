@@ -9,6 +9,21 @@ const SELLING_URL = 'https://www.facebook.com/marketplace/you/selling?state=LIVE
 // before Facebook fires its initial GraphQL requests on page load.
 installFetchHook();
 
+// Debug: respond to scan-only requests from the popup
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (msg.action === 'scanOnly') {
+    const listings = scrapeListingsFromDOM();
+    // Also count raw marketplace links for diagnostics
+    const allLinks = document.querySelectorAll('a[href*="marketplace"]');
+    sendResponse({
+      count: listings.length,
+      titles: listings.map(l => l.title),
+      linksChecked: allLinks.length,
+    });
+    return true;
+  }
+});
+
 ;(async function main() {
   'use strict';
 
@@ -79,10 +94,28 @@ async function runScraping() {
 function scrapeListingsFromDOM() {
   const seen = new Set();
   const listings = [];
-  const links = document.querySelectorAll('a[href*="/marketplace/item/"]');
 
-  for (const link of links) {
-    const match = link.href.match(/\/marketplace\/item\/(\d+)/);
+  // Collect candidate links — cover all URL patterns FB uses for marketplace listings:
+  // /marketplace/item/ID/          (public view)
+  // /marketplace/listing/ID/       (seller view)
+  // /marketplace/listing/ID/edit/  (edit view, most common on the selling page)
+  const candidateLinks = new Set();
+  for (const sel of [
+    'a[href*="/marketplace/item/"]',
+    'a[href*="/marketplace/listing/"]',
+  ]) {
+    document.querySelectorAll(sel).forEach(l => candidateLinks.add(l));
+  }
+  // Broader fallback: any <a> with "marketplace" in href containing a long numeric ID
+  document.querySelectorAll('a[href*="marketplace"]').forEach(l => {
+    if (/\/\d{8,}/.test(l.href)) candidateLinks.add(l);
+  });
+
+  console.log(`[Relister] DOM scan — candidate links found: ${candidateLinks.size}`);
+
+  for (const link of candidateLinks) {
+    // Extract ID from /marketplace/item/ID or /marketplace/listing/ID
+    const match = link.href.match(/\/marketplace\/(?:item|listing)\/(\d+)/);
     if (!match) continue;
     const id = match[1];
     if (seen.has(id)) continue;

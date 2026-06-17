@@ -59,6 +59,24 @@ function loadState() {
   );
 }
 
+document.getElementById('btn-scan').addEventListener('click', () => {
+  statusTextEl.textContent = 'Scanning...';
+  chrome.tabs.query({ active: true, currentWindow: true }, tabs => {
+    if (!tabs[0]) { statusTextEl.textContent = 'No active tab'; return; }
+    chrome.tabs.sendMessage(tabs[0].id, { action: 'scanOnly' }, response => {
+      if (chrome.runtime.lastError) {
+        statusTextEl.textContent = 'Content script not running on this page';
+        return;
+      }
+      const count = response && response.count;
+      const titles = response && response.titles ? response.titles.join(', ') : '';
+      statusTextEl.textContent = count > 0
+        ? `Found ${count}: ${titles.slice(0, 80)}`
+        : `0 found. Links seen: ${response && response.linksChecked}`;
+    });
+  });
+});
+
 btnRelist.addEventListener('click', () => {
   btnRelist.disabled = true;
   btnCancel.style.display = 'block';
