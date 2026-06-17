@@ -13,12 +13,14 @@ installFetchHook();
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.action === 'scanOnly') {
     const listings = scrapeListingsFromDOM();
-    // Also count raw marketplace links for diagnostics
-    const allLinks = document.querySelectorAll('a[href*="marketplace"]');
+    const allLinks = Array.from(document.querySelectorAll('a[href*="marketplace"]'));
+    // Return first 6 hrefs so we can see the actual URL pattern
+    const sampleHrefs = allLinks.slice(0, 6).map(l => l.href);
     sendResponse({
       count: listings.length,
       titles: listings.map(l => l.title),
       linksChecked: allLinks.length,
+      sampleHrefs,
     });
     return true;
   }

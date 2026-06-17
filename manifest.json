@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "FB Marketplace Relister",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "Automatically relists Facebook Marketplace items to keep them fresh.",
   "permissions": [
     "storage",

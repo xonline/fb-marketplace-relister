@@ -70,9 +70,10 @@ document.getElementById('btn-scan').addEventListener('click', () => {
       }
       const count = response && response.count;
       const titles = response && response.titles ? response.titles.join(', ') : '';
+      const hrefs = response && response.sampleHrefs ? response.sampleHrefs.join(' | ') : '';
       statusTextEl.textContent = count > 0
         ? `Found ${count}: ${titles.slice(0, 80)}`
-        : `0 found. Links seen: ${response && response.linksChecked}`;
+        : `0 found. Links(${response && response.linksChecked}): ${hrefs.slice(0, 200)}`;
     });
   });
 });
