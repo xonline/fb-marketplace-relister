@@ -19,6 +19,12 @@ window.addEventListener('message', event => {
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.action === 'scanOnly') {
     const listings = scrapeListingsFromDOM();
+
+    // Save full listing data to storage so testCreate can use it
+    if (listings.length > 0) {
+      chrome.storage.local.set({ listings });
+    }
+
     // Diagnostic: count action buttons that indicate listing cards
     const LISTING_ACTIONS = ['Boost listing', 'Mark as sold', 'Mark as available', 'Relist'];
     const clickables = Array.from(document.querySelectorAll('[role="button"], button, a'));
@@ -195,9 +201,22 @@ function scrapeListingsFromDOM() {
     const price = allText.find(t => /^A?\$[\d,]+$|^\$[\d,]+$/.test(t)) || '';
     const skip = new Set([...SKIP_WORDS, price]);
 
-    const title = allText
-      .filter(t => t.length > 3 && !skip.has(t) && !/^[\d,\.\$]+$/.test(t))
-      .sort((a, b) => b.length - a.length)[0] || '';
+    // Prefer heading elements so findListingCard can match exactly via exact-string match.
+    // Fallback to longest-text-node approach if no heading found.
+    let title = '';
+    const headingEls = Array.from(card.querySelectorAll('h2, h3, span[dir="auto"]'));
+    for (const h of headingEls) {
+      const t = (h.textContent || '').trim();
+      if (t.length > 3 && !skip.has(t) && !/^[\d,\.\$]+$/.test(t) && t.length < 200) {
+        title = t;
+        break;
+      }
+    }
+    if (!title) {
+      title = allText
+        .filter(t => t.length > 3 && !skip.has(t) && !/^[\d,\.\$]+$/.test(t))
+        .sort((a, b) => b.length - a.length)[0] || '';
+    }
 
     if (!title || seen.has(title)) continue;
     seen.add(title);
@@ -284,13 +303,21 @@ function scrapeListingsFromDOM() {
 }
 
 async function runDeleting() {
-  const data = await chrome.storage.local.get(['listings', 'currentIndex']);
+  const data = await chrome.storage.local.get(['listings', 'currentIndex', 'relistedCount', 'skippedCount']);
   const listings = data.listings || [];
   const i = data.currentIndex || 0;
+  const relistedCount = data.relistedCount || 0;
+  const skippedCount = data.skippedCount || 0;
 
   if (i >= listings.length) {
     await chrome.storage.local.set({ relistPending: false, relistState: null });
-    setStatus(`Done! Relisted ${listings.length} listing(s).`);
+    if (relistedCount === 0 && skippedCount > 0) {
+      setStatus(`Could not find any listing cards (${skippedCount} skipped). Make sure you're on Marketplace → Your Listings.`);
+    } else if (skippedCount > 0) {
+      setStatus(`Done! Relisted ${relistedCount}, skipped ${skippedCount} (cards not found).`);
+    } else {
+      setStatus(`Done! Relisted ${relistedCount} listing(s).`);
+    }
     return;
   }
 
@@ -301,7 +328,7 @@ async function runDeleting() {
   if (!deleted) {
     console.warn(`[Relister] Could not delete: ${listing.title} — skipping`);
     setProgress(i + 1, listings.length);
-    await chrome.storage.local.set({ currentIndex: i + 1, relistState: 'deleting' });
+    await chrome.storage.local.set({ currentIndex: i + 1, relistState: 'deleting', skippedCount: skippedCount + 1 });
     window.location.href = SELLING_URL;
     return;
   }
@@ -325,8 +352,11 @@ async function runCreating() {
 
   const listing = listings[i];
 
-  // Wait for the Title input — specific enough to confirm the form is ready
-  const titleInput = await waitForElement('input[aria-label="Title"]', 12000);
+  // Wait for the Title input — FB puts aria-label on <label>, not <input>
+  const titleInput = await waitForElement(
+    'label[aria-label="Title"] input, input[aria-label="Title"]',
+    15000
+  );
   if (!titleInput) {
     console.error('[Relister] Create page did not load in time');
     setProgress(i + 1, listings.length);
@@ -353,12 +383,16 @@ async function runCreating() {
     console.error(`[Relister] Publish failed for: ${listing.title}`);
   }
 
+  const storedCounts = await chrome.storage.local.get(['relistedCount', 'skippedCount']);
+  const newRelistedCount = (storedCounts.relistedCount || 0) + (published ? 1 : 0);
   const next = i + 1;
   setProgress(next, listings.length);
 
   if (next >= listings.length) {
-    await chrome.storage.local.set({ relistPending: false, relistState: null });
-    setStatus(`Done! Relisted ${listings.length} listing(s).`);
+    const finalSkipped = storedCounts.skippedCount || 0;
+    await chrome.storage.local.set({ relistPending: false, relistState: null, relistedCount: newRelistedCount });
+    const skipNote = finalSkipped > 0 ? `, ${finalSkipped} skipped` : '';
+    setStatus(`Done! Relisted ${newRelistedCount} listing(s)${skipNote}.`);
     await sleep(2000);
     window.location.href = SELLING_URL;
     return;
@@ -368,8 +402,8 @@ async function runCreating() {
   setStatus(`Waiting ${Math.round(delayMs / 1000)}s before next listing...`);
   await sleep(delayMs);
 
-  await chrome.storage.local.set({ currentIndex: next, relistState: 'deleting' });
-  window.location.href = 'https://www.facebook.com/marketplace/you/selling';
+  await chrome.storage.local.set({ currentIndex: next, relistState: 'deleting', relistedCount: newRelistedCount });
+  window.location.href = SELLING_URL;
 }
 
 // ─── GraphQL Parsing ──────────────────────────────────────────────────────────
@@ -493,68 +527,128 @@ function waitForListings(timeoutMs) {
 }
 
 // ─── Delete Flow ──────────────────────────────────────────────────────────────
+// Competitor-proven approach: search → click listing title → direct Delete button
+// No "..." / More Options button needed — all working bots bypass it entirely.
 
 async function deleteListing(listing) {
   setStatus(`Deleting: "${listing.title}"`);
+  const titleTrimmed = listing.title.trim();
 
-  const card = findListingCard(listing.title);
-  if (!card) {
-    console.warn(`[Relister] Card not found for: ${listing.title}`);
-    return false;
+  // Step 1: Use search box to filter — wait for it (page may still be loading)
+  const searchInput = await waitForElement('input[placeholder="Search your listings"]', 4000)
+    || await waitForElement('input[type="search"]', 1000);
+
+  if (searchInput) {
+    searchInput.focus();
+    nativeSetInput(searchInput, listing.title);
+    await sleep(2000);  // React needs time to re-render filtered results
+  } else {
+    console.warn('[Relister] Search input not found — proceeding without filtering');
   }
 
-  let moreBtn = card.querySelector('[aria-label="More options"]')
-             || card.querySelector('[aria-label="Actions for this listing"]');
+  // Step 2: Open the listing detail panel
+  let opened = false;
 
-  if (!moreBtn) {
-    const buttons = Array.from(card.querySelectorAll('[role="button"]'));
-    moreBtn = buttons.find(b => b.textContent.trim() === '' || b.textContent.trim() === '...')
-           || buttons[buttons.length - 1];
+  // Primary: click via listing ID link (bypasses title-text matching entirely)
+  const listingId = String(listing.id || '').replace(/\D/g, '');
+  if (listingId) {
+    const idLink = document.querySelector(`a[href*="/marketplace/item/${listingId}"]`);
+    if (idLink) {
+      await scrollAndClick(idLink);
+      opened = true;
+    }
   }
 
-  if (!moreBtn) {
-    console.warn('[Relister] More options button not found on card');
-    return false;
+  if (!opened) {
+    // Fallback: find title span, exclude spans inside inputs/nav/header areas
+    const allSpans = Array.from(document.querySelectorAll('span'))
+      .filter(s => !s.closest('input, textarea, [role="searchbox"], nav, [aria-label="Facebook"]'));
+    const titleSpan = allSpans.find(s => s.textContent.trim() === titleTrimmed)
+      || allSpans.find(s => {
+        const t = s.textContent.trim();
+        return t.length > 5 && titleTrimmed.startsWith(t.substring(0, 20));
+      });
+
+    if (!titleSpan) {
+      console.warn('[Relister] Listing title span not found after search:', titleTrimmed);
+      return false;
+    }
+    await scrollAndClick(titleSpan);
+    opened = true;
   }
 
-  await scrollAndClick(moreBtn);
-  await sleep(MEDIUM());
+  await sleep(2000);  // Give the detail panel time to open
 
-  // Try multiple selector patterns — Facebook varies tabindex and role usage
-  const deleteBtn = await waitForElement(
-    'div[aria-label="Delete"][tabindex="0"], div[aria-label="Delete"][role="menuitem"], li[role="menuitem"] div[aria-label="Delete"]',
-    5000
+  // Step 3: Click Delete — try precise selector first, then broader fallback
+  let deleteBtn = await waitForElement(
+    'div:not([role="gridcell"]) > div[aria-label="Delete"][tabindex="0"]',
+    6000
   );
   if (!deleteBtn) {
-    console.warn('[Relister] Delete button not found in dropdown');
+    deleteBtn = await waitForElement('div[aria-label="Delete"][tabindex="0"]', 2000);
+  }
+  if (!deleteBtn) {
+    console.warn('[Relister] Direct Delete button not found in detail panel');
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
     return false;
   }
 
   await scrollAndClick(deleteBtn);
-  await sleep(MEDIUM());
+  await sleep(1000);
 
-  // Confirm dialog — try multiple label variants used across regions
-  const confirmBtn = await waitForElement(
-    'div[role="dialog"] div[aria-label="Delete"], div[role="dialog"] div[aria-label="Remove"], div[role="alertdialog"] div[aria-label="Delete"], div[role="alertdialog"] div[aria-label="Remove listing"]',
+  // Step 4: Confirm deletion — FB uses two capitalizations
+  let confirmBtn = await waitForElement(
+    'div[aria-label="Delete listing"] div[aria-label="Delete"][tabindex="0"]',
     5000
   );
   if (!confirmBtn) {
-    console.warn('[Relister] Delete confirmation button not found');
+    confirmBtn = await waitForElement(
+      'div[aria-label="Delete Listing"] div[aria-label="Delete"][tabindex="0"]',
+      3000
+    );
+  }
+  if (!confirmBtn) {
+    console.warn('[Relister] Delete confirmation not found');
     return false;
   }
 
   await scrollAndClick(confirmBtn);
 
+  // Step 5: Wait for panel to close. If panel label differs/not present, treat as success.
   await sleep(1000);
-  const gone = await waitForCardGone(listing.title, 8000);
+  const panelEl = document.querySelector('div[aria-label="Your Listing"]');
+  if (!panelEl) return true;
+  const gone = await waitForElementGone('div[aria-label="Your Listing"]', 8000);
   return gone;
 }
 
 function findListingCard(title) {
+  const titleTrimmed = title.trim();
   const headings = Array.from(document.querySelectorAll('h2, h3, span[dir="auto"]'));
-  const matchHeading = headings.find(h => h.textContent.trim() === title.trim());
-  if (!matchHeading) return null;
+
+  // Exact match first
+  let matchHeading = headings.find(h => h.textContent.trim() === titleTrimmed);
+
+  // Fuzzy fallback: scraped title (longest-text) can differ from DOM heading text.
+  // Use a 20-char prefix comparison in both directions to bridge the mismatch.
+  if (!matchHeading) {
+    const shortTitle = titleTrimmed.substring(0, Math.min(20, titleTrimmed.length));
+    matchHeading = headings.find(h => {
+      const t = h.textContent.trim();
+      const shortH = t.substring(0, Math.min(20, t.length));
+      return (shortTitle && t.startsWith(shortTitle)) ||
+             (shortH && titleTrimmed.startsWith(shortH));
+    });
+    if (matchHeading) {
+      console.log(`[Relister] findListingCard: fuzzy match for "${titleTrimmed}" → "${matchHeading.textContent.trim().substring(0, 40)}"`);
+    }
+  }
+
+  if (!matchHeading) {
+    console.warn(`[Relister] findListingCard: no match for "${titleTrimmed}". Headings checked:`,
+      headings.slice(0, 8).map(h => h.textContent.trim().substring(0, 40)));
+    return null;
+  }
 
   // Walk up looking for a semantic container
   let node = matchHeading;
@@ -593,7 +687,8 @@ async function waitForCardGone(title, timeoutMs) {
 
 async function fillCreateForm(listing) {
   setStatus('Filling: Title');
-  const titleInput = spanTextFinder('Title', 'input');
+  const titleInput = document.querySelector('label[aria-label="Title"] input')
+                  || spanTextFinder('Title', 'input');
   if (!titleInput) {
     console.error('[Relister] Title input not found');
     return false;
@@ -603,7 +698,8 @@ async function fillCreateForm(listing) {
   await sleep(SHORT());
 
   setStatus('Filling: Price');
-  const priceInput = spanTextFinder('Price', 'input');
+  const priceInput = document.querySelector('label[aria-label="Price"] input')
+                  || spanTextFinder('Price', 'input');
   if (!priceInput) {
     console.error('[Relister] Price input not found');
     return false;
@@ -633,7 +729,8 @@ async function fillCreateForm(listing) {
 
   if (listing.description) {
     setStatus('Filling: Description');
-    const descTextarea = spanTextFinder('Description', 'textarea');
+    const descTextarea = document.querySelector('label[aria-label="Description"] textarea')
+                      || spanTextFinder('Description', 'textarea');
     if (descTextarea) {
       descTextarea.focus();
       nativeSetTextarea(descTextarea, listing.description);
@@ -643,10 +740,9 @@ async function fillCreateForm(listing) {
     }
   }
 
-  // Location: not in GraphQL data, but clicking the field may trigger
-  // auto-suggestions from Facebook's IP geolocation or browser history
   setStatus('Filling: Location');
-  const locationInput = document.querySelector('input[aria-label*="Location"]')
+  const locationInput = document.querySelector('label[aria-label="Location"] input')
+                     || document.querySelector('input[aria-label*="Location"]')
                      || document.querySelector('input[placeholder*="ocation"]');
   if (locationInput) {
     if (listing.location) {
