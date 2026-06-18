@@ -11,7 +11,7 @@
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
       background: #1c1e21;
       color: #e4e6ea;
-      width: 320px;
+      width: 300px;
       padding: 16px;
     }
 
@@ -19,8 +19,13 @@
       font-size: 15px;
       font-weight: 700;
       color: #1877f2;
-      margin-bottom: 12px;
-      letter-spacing: 0.3px;
+      margin-bottom: 4px;
+    }
+
+    .version {
+      font-size: 11px;
+      color: #b0b3b8;
+      margin-bottom: 14px;
     }
 
     .card {
@@ -35,196 +40,80 @@
       text-transform: uppercase;
       letter-spacing: 0.8px;
       color: #b0b3b8;
-      margin-bottom: 4px;
-    }
-
-    .value {
-      font-size: 20px;
-      font-weight: 700;
-      color: #e4e6ea;
+      margin-bottom: 6px;
     }
 
     .status-text {
       font-size: 13px;
-      color: #b0b3b8;
-      min-height: 20px;
+      color: #e4e6ea;
       word-break: break-word;
+      min-height: 18px;
     }
 
-    .progress-bar-wrap {
-      background: #3a3b3c;
-      border-radius: 4px;
-      height: 6px;
-      margin-top: 8px;
-      overflow: hidden;
-    }
-
-    .progress-bar {
-      height: 6px;
-      background: #1877f2;
-      border-radius: 4px;
-      transition: width 0.3s ease;
-      width: 0%;
-    }
-
-    .progress-label {
-      font-size: 11px;
+    .hint {
+      font-size: 12px;
       color: #b0b3b8;
-      margin-top: 4px;
-      text-align: right;
+      line-height: 1.5;
     }
 
-    button {
-      width: 100%;
-      padding: 10px;
-      border: none;
-      border-radius: 6px;
-      font-size: 14px;
+    .hint strong { color: #e4e6ea; }
+
+    a.open-link {
+      display: block;
+      text-align: center;
+      font-size: 13px;
       font-weight: 600;
-      cursor: pointer;
+      color: #fff;
+      background: #1877f2;
+      text-decoration: none;
+      border-radius: 6px;
+      padding: 9px;
       margin-bottom: 8px;
       transition: opacity 0.15s;
     }
+    a.open-link:hover { opacity: 0.88; }
 
-    button:hover { opacity: 0.9; }
-    button:disabled { opacity: 0.4; cursor: not-allowed; }
-
-    #btn-relist {
-      background: #1877f2;
-      color: #fff;
+    button {
+      width: 100%;
+      padding: 9px;
+      border: none;
+      border-radius: 6px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: opacity 0.15s;
     }
+    button:hover { opacity: 0.88; }
 
-    #btn-cancel {
-      background: #3a3b3c;
-      color: #e4e6ea;
-      display: none;
-    }
-
-    #btn-scan {
+    #btn-clear-cache {
       background: #3a3b3c;
       color: #b0b3b8;
-      font-size: 12px;
-      padding: 7px;
     }
 
-    #btn-relist-selected {
-      background: #1877f2;
-      color: #fff;
-    }
-
-    .listing-item {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      font-size: 13px;
-      color: #e4e6ea;
-      cursor: pointer;
-      padding: 3px 0;
-    }
-
-    .listing-item input[type="checkbox"] {
-      width: 15px;
-      height: 15px;
-      cursor: pointer;
-      flex-shrink: 0;
-      accent-color: #1877f2;
-    }
-
-    .listing-item span {
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
-
-    .schedule-section { margin-top: 4px; }
-
-    .schedule-row {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      margin-bottom: 8px;
-    }
-
-    .schedule-row label {
-      font-size: 13px;
-      color: #e4e6ea;
-      white-space: nowrap;
-    }
-
-    .schedule-row input[type="time"] {
-      background: #3a3b3c;
-      border: 1px solid #4e4f50;
-      border-radius: 4px;
-      color: #e4e6ea;
-      padding: 4px 8px;
-      font-size: 13px;
-      flex: 1;
-    }
-
-    #btn-schedule-toggle {
-      background: #3a3b3c;
-      color: #e4e6ea;
-      font-size: 13px;
-      padding: 8px;
-    }
-
-    #schedule-status {
-      font-size: 11px;
-      color: #b0b3b8;
-      text-align: center;
-    }
-
-    .divider {
-      height: 1px;
-      background: #3a3b3c;
-      margin: 10px 0;
+    #btn-clear-cache.done {
+      color: #2e7d32;
     }
   </style>
 </head>
 <body>
   <h1>FB Marketplace Relister</h1>
+  <div class="version">v2.1.0 — Direct API mode</div>
 
   <div class="card">
-    <div class="label">Listings Detected</div>
-    <div class="value" id="listing-count">—</div>
+    <div class="label">Last Status</div>
+    <div class="status-text" id="status-text">Ready</div>
   </div>
 
   <div class="card">
-    <div class="label">Status</div>
-    <div class="status-text" id="status-text">Loading...</div>
-    <div class="progress-bar-wrap">
-      <div class="progress-bar" id="progress-bar"></div>
+    <div class="hint">
+      <strong>Relist</strong> buttons appear on each listing card on your selling page.
+      Click one to delete &amp; re-post that item instantly via Facebook's API.
     </div>
-    <div class="progress-label" id="progress-label"></div>
   </div>
 
-  <button id="btn-scan">Scan to Select Listings</button>
+  <a id="link-open-listings" class="open-link" href="#">Open My Listings Page</a>
 
-  <div id="listings-section" style="display:none;">
-    <div class="card" style="padding:8px 12px;">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
-        <div class="label" style="margin:0;">Select to relist</div>
-        <button id="btn-toggle-all" style="width:auto;padding:3px 10px;font-size:11px;margin:0;background:#3a3b3c;color:#b0b3b8;">All</button>
-      </div>
-      <div id="listings-checkboxes" style="max-height:160px;overflow-y:auto;display:flex;flex-direction:column;gap:6px;"></div>
-    </div>
-    <button id="btn-relist-selected">Relist Selected</button>
-  </div>
-
-  <button id="btn-relist">Relist All Now</button>
-  <button id="btn-cancel">Cancel</button>
-
-  <div class="divider"></div>
-
-  <div class="card schedule-section">
-    <div class="label">Daily Auto-Relist</div>
-    <div class="schedule-row" style="margin-top:8px;">
-      <label for="schedule-time">Time</label>
-      <input type="time" id="schedule-time" value="09:00" />
-    </div>
-    <button id="btn-schedule-toggle">Enable Schedule</button>
-    <div id="schedule-status"></div>
-  </div>
+  <button id="btn-clear-cache">Clear Token Cache</button>
 
   <script src="popup.js"></script>
 </body>

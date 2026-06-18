@@ -1,12 +1,11 @@
 {
   "manifest_version": 3,
   "name": "FB Marketplace Relister",
-  "version": "2.0.2",
-  "description": "Automatically relists Facebook Marketplace items to keep them fresh.",
+  "version": "2.1.0",
+  "description": "Relists Facebook Marketplace items via direct API — no UI interaction required.",
   "permissions": [
     "storage",
     "tabs",
-    "alarms",
     "scripting",
     "activeTab"
   ],
@@ -18,15 +17,9 @@
   },
   "content_scripts": [
     {
-      "matches": ["*://www.facebook.com/marketplace/*"],
-      "js": ["hook.js"],
-      "run_at": "document_start",
-      "world": "MAIN"
-    },
-    {
-      "matches": ["*://www.facebook.com/marketplace/*"],
-      "js": ["utils.js", "drop_img.js", "content.js"],
-      "run_at": "document_start"
+      "matches": ["*://www.facebook.com/marketplace/you/selling*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
     }
   ],
   "action": {
