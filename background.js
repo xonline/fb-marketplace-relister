@@ -143,6 +143,113 @@ async function getLiveIdsForGating(sellingTabId) {
   return ids;
 }
 
+// ─── Harvest interceptor ──────────────────────────────────────────────────────
+// Injects a MAIN-world fetch+XHR wrapper that collects listing data from FB's
+// GraphQL responses as they arrive. window.__fbrHarvested accumulates every
+// active listing seen in ANY /api/graphql response (both Comet + Fast queries),
+// so a single loadAllCards() scroll yields the complete ~20-listing set.
+
+async function installHarvestInterceptor(tabId) {
+  try {
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      world: 'MAIN',
+      func: () => {
+        if (window.__fbrInterceptorInstalled) return;
+        window.__fbrInterceptorInstalled = true;
+        if (!window.__fbrHarvested) window.__fbrHarvested = [];
+
+        // Walk an object tree and push every active marketplace listing found.
+        function collectFromObj(obj) {
+          function walk(o, seen, depth) {
+            if (!o || typeof o !== 'object' || depth > 50 || seen.has(o)) return;
+            seen.add(o);
+            const tn = o.__typename;
+            if ((tn === 'MarketplaceForSaleItem' || tn === 'GroupCommerceProductItem') &&
+                o.id && o.marketplace_listing_title &&
+                !(o.is_sold || o.is_pending || o.is_draft)) {
+              const id = String(o.id);
+              if (!window.__fbrHarvested.some(x => x.id === id)) {
+                const uri = (o.primary_listing_photo && o.primary_listing_photo.image && o.primary_listing_photo.image.uri)
+                         || (o.listing_photos && o.listing_photos.edges && o.listing_photos.edges[0] && o.listing_photos.edges[0].node && o.listing_photos.edges[0].node.image && o.listing_photos.edges[0].node.image.uri)
+                         || null;
+                let photoFilename = null;
+                if (uri) {
+                  try { photoFilename = new URL(uri).pathname.split('/').pop() || null; }
+                  catch { photoFilename = uri.split('/').pop().split('?')[0] || null; }
+                }
+                window.__fbrHarvested.push({ id, title: o.marketplace_listing_title, photoFilename });
+              }
+            }
+            const vals = Array.isArray(o) ? o : Object.values(o);
+            for (const v of vals) walk(v, seen, depth + 1);
+          }
+          walk(obj, new Set(), 0);
+        }
+
+        // Parse a raw GraphQL response body (may be newline-delimited multi-JSON).
+        function processText(text) {
+          if (!text || !text.includes('marketplace_listing_title')) return;
+          for (const line of text.split('\n')) {
+            if (!line.trim()) continue;
+            try { collectFromObj(JSON.parse(line)); } catch (_) {}
+          }
+        }
+
+        // Wrap window.fetch
+        const _origFetch = window.fetch;
+        window.fetch = function() {
+          const args = Array.prototype.slice.call(arguments);
+          const url = (typeof args[0] === 'string') ? args[0]
+                    : (args[0] && typeof args[0].url === 'string') ? args[0].url : '';
+          const p = _origFetch.apply(this, args);
+          if (url.indexOf('/api/graphql') !== -1) {
+            p.then(function(resp) {
+              resp.clone().text().then(processText).catch(function(){});
+            }).catch(function(){});
+          }
+          return p;
+        };
+
+        // Wrap XMLHttpRequest
+        const _origOpen = XMLHttpRequest.prototype.open;
+        const _origSend = XMLHttpRequest.prototype.send;
+        XMLHttpRequest.prototype.open = function(method, url) {
+          this.__fbrXhrUrl = String(url || '');
+          return _origOpen.apply(this, arguments);
+        };
+        XMLHttpRequest.prototype.send = function() {
+          if (this.__fbrXhrUrl && this.__fbrXhrUrl.indexOf('/api/graphql') !== -1) {
+            var self = this;
+            self.addEventListener('load', function() {
+              try { processText(self.responseText); } catch (_) {}
+            });
+          }
+          return _origSend.apply(this, arguments);
+        };
+      }
+    });
+  } catch (e) {
+    console.warn('[Relister v3] installHarvestInterceptor failed:', e.message);
+  }
+}
+
+// Read the accumulated harvest from MAIN world.
+// Returns [{id, title, photoFilename}, ...] in insertion order.
+async function readHarvestedListings(tabId) {
+  try {
+    const results = await chrome.scripting.executeScript({
+      target: { tabId },
+      world: 'MAIN',
+      func: () => window.__fbrHarvested || [],
+    });
+    return results[0]?.result || [];
+  } catch (e) {
+    console.warn('[Relister v3] readHarvestedListings failed:', e.message);
+    return [];
+  }
+}
+
 // ─── Condition normaliser ─────────────────────────────────────────────────────
 // The create mutation's `condition` field accepts ONLY these enum values:
 //   NEW_ITEM / PC_USED_LIKE_NEW / PC_USED_GOOD / PC_USED_FAIR
@@ -1035,10 +1142,24 @@ async function relist(listingId, sellingTabId, isPro = false) {
 }
 
 // ─── Fetch live listing IDs ───────────────────────────────────────────────────
-// Queries the marketplace selling GraphQL endpoint for all IN_STOCK (live) listings.
-// Returns an array of listing ID strings.
+// Returns an array of listing ID strings for all IN_STOCK (live) listings.
+// Three-tier strategy:
+//   TIER 0 — harvest interceptor (window.__fbrHarvested, populated during loadAllCards)
+//   TIER 1 — Comet + Fast GraphQL queries (background, paginated)
+//   TIER 2 — inline DOM JSON scan (initial server-rendered batch only)
 
 async function fetchLiveListingIds(sellingTabId, tokens) {
+  // ── TIER 0: harvest interceptor ──────────────────────────────────────────────
+  // Populated by the MAIN-world interceptor injected at page load, capturing ALL
+  // GraphQL responses as content.js scrolls through the listing feed.
+  const harvested = await readHarvestedListings(sellingTabId);
+  if (harvested.length > 0) {
+    const arr = harvested.map(x => x.id);
+    console.log('[Relister v3] fetchLiveListingIds (harvest) found', arr.length, 'active listings');
+    return arr;
+  }
+
+  // ── TIER 1: dual GraphQL queries ─────────────────────────────────────────────
   // Walk any object for active marketplace-listing node IDs.
   function collectNodes(obj, ids, seen, depth) {
     if (!obj || typeof obj !== 'object' || (depth || 0) > 45 || seen.has(obj)) return;
@@ -1051,43 +1172,92 @@ async function fetchLiveListingIds(sellingTabId, tokens) {
     const vals = Array.isArray(obj) ? obj : Object.values(obj);
     for (const v of vals) collectNodes(v, ids, seen, (depth || 0) + 1);
   }
+  function findPageInfo(o, s, d) {
+    if (!o || typeof o !== 'object' || (d || 0) > 30 || s.has(o)) return null; s.add(o);
+    if (o.page_info && typeof o.page_info === 'object' && 'has_next_page' in o.page_info) return o.page_info;
+    for (const v of (Array.isArray(o) ? o : Object.values(o))) { const r = findPageInfo(v, s, d + 1); if (r) return r; }
+    return null;
+  }
 
-  // PRIMARY: paginated GraphQL (proven) — paginate through ALL pages.
-  const dynDoc = await getDocId(sellingTabId, 'CometMarketplaceYourListingsPaginationQuery_facebookRelayOperation');
-  const docId  = dynDoc || '6206851639350477'; // hardcoded fallback (proven working)
   try {
     const ids = new Set();
-    let cursor = null;
-    for (let page = 0; page < 10; page++) {
-      const json = await fbGraphQL(
-        tokens, docId, 'CometMarketplaceYourListingsPaginationQuery',
-        { count: 50, cursor, data: { filter: { state: 'LIVE', status: ['IN_STOCK'] }, marketplaceType: 'MARKETPLACE' }, scale: 1 },
-        SELLING_URL,
-        sellingTabId
-      );
-      if (json?.errors?.length) throw new Error(json.errors[0]?.message || 'graphql error');
-      const before = ids.size;
-      collectNodes(json?.data, ids, new Set(), 0);
-      const pi = (function findPageInfo(o, s, d) {
-        if (!o || typeof o !== 'object' || (d || 0) > 30 || s.has(o)) return null; s.add(o);
-        if (o.page_info && typeof o.page_info === 'object' && 'has_next_page' in o.page_info) return o.page_info;
-        for (const v of (Array.isArray(o) ? o : Object.values(o))) { const r = findPageInfo(v, s, d + 1); if (r) return r; }
-        return null;
-      })(json?.data, new Set(), 0);
-      if (!pi || !pi.has_next_page || !pi.end_cursor || pi.end_cursor === cursor) break;
-      if (ids.size === before && page > 0) break;
-      cursor = pi.end_cursor;
+
+    // 1a — CometMarketplaceYourListingsPaginationQuery (returns the "featured" section)
+    const dynDoc = await getDocId(sellingTabId, 'CometMarketplaceYourListingsPaginationQuery_facebookRelayOperation');
+    const cometDocId = dynDoc || '6206851639350477';
+    try {
+      let cursor = null;
+      for (let page = 0; page < 10; page++) {
+        const json = await fbGraphQL(
+          tokens, cometDocId, 'CometMarketplaceYourListingsPaginationQuery',
+          { count: 50, cursor, data: { filter: { state: 'LIVE', status: ['IN_STOCK'] }, marketplaceType: 'MARKETPLACE' }, scale: 1 },
+          SELLING_URL, sellingTabId
+        );
+        if (json?.errors?.length) throw new Error(json.errors[0]?.message || 'graphql error');
+        const before = ids.size;
+        collectNodes(json?.data, ids, new Set(), 0);
+        const pi = findPageInfo(json?.data, new Set(), 0);
+        if (!pi || !pi.has_next_page || !pi.end_cursor || pi.end_cursor === cursor) break;
+        if (ids.size === before && page > 0) break;
+        cursor = pi.end_cursor;
+      }
+    } catch (e) {
+      console.warn('[Relister v3] Comet query failed:', e.message);
     }
+
+    // 1b — MarketplaceYouSellingFastActiveSectionPaginationQuery (all listings incl. older renewals)
+    // doc_id 28117464584521827 confirmed live (enumerate.mjs 2026-06-27).
+    const fastDocId = '28117464584521827';
+    try {
+      let cursor = null;
+      for (let page = 0; page < 15; page++) {
+        const json = await fbGraphQL(
+          tokens, fastDocId, 'MarketplaceYouSellingFastActiveSectionPaginationQuery',
+          {
+            count: 24, cursor,
+            order: 'CREATION_TIMESTAMP_DESC',
+            scale: 2,
+            state: 'LIVE',
+            status: ['IN_STOCK'],
+            title_search: null,
+            __relay_internal__pv__ShouldUpdateMarketplaceBoostListingBoostedStatusrelayprovider: false,
+          },
+          SELLING_URL, sellingTabId
+        );
+        if (json?.errors?.length) break; // non-fatal: Comet results still valid
+        const before = ids.size;
+        collectNodes(json?.data, ids, new Set(), 0);
+        // The Fast query wraps listings in first_listing; collect those too.
+        function collectFastEdges(o, seen, d) {
+          if (!o || typeof o !== 'object' || d > 40 || seen.has(o)) return;
+          seen.add(o);
+          if (o.first_listing && o.first_listing.id && o.first_listing.marketplace_listing_title &&
+              !(o.first_listing.is_sold || o.first_listing.is_pending || o.first_listing.is_draft)) {
+            ids.add(String(o.first_listing.id));
+          }
+          for (const v of (Array.isArray(o) ? o : Object.values(o))) collectFastEdges(v, seen, d + 1);
+        }
+        collectFastEdges(json?.data, new Set(), 0);
+        const pi = findPageInfo(json?.data, new Set(), 0);
+        if (!pi || !pi.has_next_page || !pi.end_cursor || pi.end_cursor === cursor) break;
+        if (ids.size === before && page > 0) break;
+        cursor = pi.end_cursor;
+      }
+    } catch (e) {
+      console.warn('[Relister v3] Fast query failed:', e.message);
+    }
+
     if (ids.size) {
       const arr = [...ids];
-      console.log('[Relister v3] fetchLiveListingIds (GraphQL) found', arr.length, 'active listings');
+      console.log('[Relister v3] fetchLiveListingIds (GraphQL dual) found', arr.length, 'active listings');
       return arr;
     }
   } catch (e) {
-    console.warn('[Relister v3] fetchLiveListingIds GraphQL failed, falling back to JSON scan:', e.message);
+    console.warn('[Relister v3] fetchLiveListingIds GraphQL tier failed:', e.message);
   }
 
-  // FALLBACK: scan the selling page's inline JSON (gets the initially-rendered batch).
+  // ── TIER 2: inline DOM JSON scan ─────────────────────────────────────────────
+  // Last resort: scan server-rendered JSON blobs (initial batch only, ~5 listings).
   const results = await chrome.scripting.executeScript({
     target: { tabId: sellingTabId }, world: 'MAIN',
     func: () => {
@@ -1336,45 +1506,77 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return true;
   }
 
-  // GET_PHOTO_MAP — content.js requests photo-filename → listing-id map
-  // Uses the proven CometMarketplaceYourListingsPaginationQuery + dynamic doc_id
+  // INSTALL_HARVEST_INTERCEPTOR — content.js asks background to inject fetch+XHR
+  // interceptor into MAIN world so all subsequent GraphQL responses are harvested.
+  if (msg.kind === 'INSTALL_HARVEST_INTERCEPTOR') {
+    const tabId = sender.tab?.id;
+    if (!tabId) { sendResponse({ ok: false, error: 'No tab ID' }); return false; }
+    installHarvestInterceptor(tabId)
+      .then(() => sendResponse({ ok: true }))
+      .catch(e => sendResponse({ ok: false, error: e.message }));
+    return true;
+  }
+
+  // INVALIDATE_LIVE_IDS_CACHE — content.js calls after loadAllCards so the post-harvest
+  // applyFreeGating() call re-fetches all ~20 IDs rather than the cached pre-scroll count.
+  if (msg.kind === 'INVALIDATE_LIVE_IDS_CACHE') {
+    _liveIdsCache = null;
+    sendResponse({ ok: true });
+    return false;
+  }
+
+  // GET_PHOTO_MAP — content.js requests photo-filename → listing-id map.
+  // TIER 0: harvest interceptor data (populated after loadAllCards scroll, complete ~20).
+  // TIER 1: CometMarketplaceYourListingsPaginationQuery GraphQL fallback.
   if (msg.kind === 'GET_PHOTO_MAP') {
     const tabId = sender.tab?.id;
     if (!tabId) { sendResponse({ ok: false, error: 'No tab ID' }); return false; }
 
-    function photoUri(listing) {
-      return listing.primary_listing_photo?.image?.uri
-          ?? listing.listing_photos?.edges?.[0]?.node?.image?.uri
-          ?? null;
-    }
-    function filenameFromUri(uri) {
-      if (!uri) return null;
-      try { return new URL(uri).pathname.split('/').pop() || null; }
-      catch { return uri.split('/').pop()?.split('?')[0] || null; }
-    }
-    function collectPhotos(obj, map, seen, depth) {
-      if (!obj || typeof obj !== 'object' || (depth || 0) > 45 || seen.has(obj)) return;
-      seen.add(obj);
-      const tn = obj.__typename;
-      if ((tn === 'MarketplaceForSaleItem' || tn === 'GroupCommerceProductItem') &&
-          obj.id && obj.marketplace_listing_title) {
-        if (!(obj.is_sold || obj.is_pending || obj.is_draft)) {
-          const uri = photoUri(obj);
-          const fn  = filenameFromUri(uri);
-          if (fn) map[fn] = String(obj.id);
-        }
-      }
-      const vals = Array.isArray(obj) ? obj : Object.values(obj);
-      for (const v of vals) collectPhotos(v, map, seen, (depth || 0) + 1);
-    }
-    function findPageInfo(o, s, d) {
-      if (!o || typeof o !== 'object' || (d || 0) > 30 || s.has(o)) return null; s.add(o);
-      if (o.page_info && typeof o.page_info === 'object' && 'has_next_page' in o.page_info) return o.page_info;
-      for (const v of (Array.isArray(o) ? o : Object.values(o))) { const r = findPageInfo(v, s, d + 1); if (r) return r; }
-      return null;
-    }
-
     (async () => {
+      // TIER 0: harvest interceptor — complete set after loadAllCards.
+      const harvested = await readHarvestedListings(tabId);
+      if (harvested.length > 0) {
+        const photoMap = {};
+        for (const item of harvested) {
+          if (item.photoFilename) photoMap[item.photoFilename] = item.id;
+        }
+        console.log('[Relister v3] GET_PHOTO_MAP (harvest) returning', Object.keys(photoMap).length, 'entries from', harvested.length, 'listings');
+        return photoMap;
+      }
+
+      // TIER 1: Comet GraphQL (initial batch only, ~5-10 listings — pre-scroll fallback).
+      function photoUri(listing) {
+        return listing.primary_listing_photo?.image?.uri
+            ?? listing.listing_photos?.edges?.[0]?.node?.image?.uri
+            ?? null;
+      }
+      function filenameFromUri(uri) {
+        if (!uri) return null;
+        try { return new URL(uri).pathname.split('/').pop() || null; }
+        catch { return uri.split('/').pop()?.split('?')[0] || null; }
+      }
+      function collectPhotos(obj, map, seen, depth) {
+        if (!obj || typeof obj !== 'object' || (depth || 0) > 45 || seen.has(obj)) return;
+        seen.add(obj);
+        const tn = obj.__typename;
+        if ((tn === 'MarketplaceForSaleItem' || tn === 'GroupCommerceProductItem') &&
+            obj.id && obj.marketplace_listing_title) {
+          if (!(obj.is_sold || obj.is_pending || obj.is_draft)) {
+            const uri = photoUri(obj);
+            const fn  = filenameFromUri(uri);
+            if (fn) map[fn] = String(obj.id);
+          }
+        }
+        const vals = Array.isArray(obj) ? obj : Object.values(obj);
+        for (const v of vals) collectPhotos(v, map, seen, (depth || 0) + 1);
+      }
+      function findPageInfoPM(o, s, d) {
+        if (!o || typeof o !== 'object' || (d || 0) > 30 || s.has(o)) return null; s.add(o);
+        if (o.page_info && typeof o.page_info === 'object' && 'has_next_page' in o.page_info) return o.page_info;
+        for (const v of (Array.isArray(o) ? o : Object.values(o))) { const r = findPageInfoPM(v, s, d + 1); if (r) return r; }
+        return null;
+      }
+
       const tokens = await getTokens(tabId);
       const dynDoc = await getDocId(tabId, 'CometMarketplaceYourListingsPaginationQuery_facebookRelayOperation');
       const docId  = dynDoc || '6206851639350477';
@@ -1389,7 +1591,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         );
         if (json?.errors?.length) throw new Error(json.errors[0]?.message || 'graphql error');
         collectPhotos(json?.data, photoMap, new Set(), 0);
-        const pi = findPageInfo(json?.data, new Set(), 0);
+        const pi = findPageInfoPM(json?.data, new Set(), 0);
         if (!pi || !pi.has_next_page || !pi.end_cursor || pi.end_cursor === cursor) break;
         cursor = pi.end_cursor;
       }

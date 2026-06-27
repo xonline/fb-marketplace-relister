@@ -810,6 +810,15 @@ async function loadAllCards() {
 async function init() {
   console.log('[Relister v3] content.js loaded — UI Automation mode');
 
+  // Install MAIN-world fetch+XHR interceptor BEFORE scrolling so all subsequent
+  // GraphQL responses (both Comet + Fast queries) are harvested into window.__fbrHarvested.
+  // This is the primary enumeration path; await ensures it's installed before loadAllCards.
+  try {
+    await chrome.runtime.sendMessage({ kind: 'INSTALL_HARVEST_INTERCEPTOR' });
+  } catch (e) {
+    console.warn('[Relister v3] Could not install harvest interceptor:', e.message);
+  }
+
   // Run primary DOM scan immediately (works if links are already in the DOM)
   scanByDOMLinks();
 
@@ -830,14 +839,35 @@ async function init() {
   }, { passive: true, capture: true });
 
   // A couple of quick scans for the initially-visible cards, then auto-scroll the
-  // whole list so EVERY listing renders and gets a button/checkbox (the behaviour
-  // that showed buttons "all the way down" before).
+  // whole list so EVERY listing renders and gets a button/checkbox. During the scroll
+  // the harvest interceptor collects ALL ~20 listings from FB's GraphQL responses.
   scanListings();
   await applyFreeGating();   // set _isPro/_lockedIds EARLY so injectButton gates each card on (re)mount
   await new Promise(r => setTimeout(r, 800));
   scanListings();
-  await loadAllCards();
-  await applyFreeGating();   // catch-up for cards injected before gating state was known
+  await loadAllCards();      // triggers all FB GraphQL queries → interceptor captures all ~20
+
+  // After scrolling, the harvest interceptor has collected all listings.
+  // Invalidate the live-IDs cache so the next applyFreeGating fetches from harvest.
+  chrome.runtime.sendMessage({ kind: 'INVALIDATE_LIVE_IDS_CACHE' }).catch(() => {});
+
+  // Refresh the photo map with the full harvested set (~20) so scanByPhotoMap can
+  // inject buttons on all rendered cards.
+  try {
+    const res = await chrome.runtime.sendMessage({ kind: 'GET_PHOTO_MAP' });
+    if (res?.ok && res.photoMap) {
+      const harvestedMap = new Map(Object.entries(res.photoMap));
+      if (harvestedMap.size > (_listingPhotoMap ? _listingPhotoMap.size : 0)) {
+        _listingPhotoMap = harvestedMap;
+        console.log('[Relister v3] Photo map refreshed post-scroll:', _listingPhotoMap.size, 'listings');
+      }
+    }
+  } catch (e) {
+    console.warn('[Relister v3] Post-scroll photo map refresh failed:', e.message);
+  }
+  scanListings();            // inject buttons on all visible cards with the full photo map
+
+  await applyFreeGating();   // catch-up gating: now uses all ~20 harvested IDs
 
   // Clear the "scan in progress…" status so the popup doesn't spin forever. Only if a
   // relist isn't currently mid-flight (don't clobber live progress).
