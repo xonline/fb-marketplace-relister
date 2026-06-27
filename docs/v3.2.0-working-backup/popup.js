@@ -1,7 +1,5 @@
 'use strict';
 
-const FEATURE_REQUEST_URL = 'https://docs.google.com/forms/d/e/1FAIpQLSc78R_TngfIQdszSibKVsNnsKYJVyK0zqj2eg4bZ8K6rJylqA/viewform';
-
 // ── Element refs ──────────────────────────────────────────────────────────────
 
 const dot            = document.getElementById('dot');
@@ -20,28 +18,6 @@ const stepsWrap      = document.getElementById('steps-wrap');
 const stepsBar       = document.getElementById('steps-bar');
 const btnClear       = document.getElementById('btn-clear');
 const cacheInfo      = document.getElementById('cache-info');
-const btnRelistAll   = document.getElementById('btn-relist-all');
-const btnOptions     = document.getElementById('btn-options');
-const planBadge      = document.getElementById('plan-badge');
-const planLabel      = document.getElementById('plan-label');
-const planSub        = document.getElementById('plan-sub');
-const planBarBg      = document.getElementById('plan-bar-bg');
-const planBarFill    = document.getElementById('plan-bar-fill');
-const btnUpgrade     = document.getElementById('btn-upgrade');
-// Auto-Relist section
-const arMode         = document.getElementById('ar-mode');
-const arDatetime     = document.getElementById('ar-datetime');
-const arDtWrap       = document.getElementById('ar-dt-wrap');
-const arTime         = document.getElementById('ar-time');
-const arTWrap        = document.getElementById('ar-t-wrap');
-const arWeekday      = document.getElementById('ar-weekday');
-const arWdWrap       = document.getElementById('ar-wd-wrap');
-const arHours        = document.getElementById('ar-hours');
-const arHWrap        = document.getElementById('ar-h-wrap');
-const arAiToggle     = document.getElementById('ar-ai-toggle');
-const arEnabled      = document.getElementById('ar-enabled');
-const btnArSave      = document.getElementById('btn-ar-save');
-const arProBadge     = document.getElementById('ar-pro-badge');
 
 const STEP_IDS    = ['s0', 's1', 's2', 's3', 's4'];
 const SELLING_URL = 'https://www.facebook.com/marketplace/you/selling?state=LIVE&status[0]=IN_STOCK';
@@ -188,119 +164,22 @@ function checkCacheStatus() {
   });
 }
 
-// ── Plan status (monetization) ────────────────────────────────────────────────
+// ── Session stats ─────────────────────────────────────────────────────────────
 
-// _proStatus: cached result of the last CHECK_PRO call (updated on init + storage change)
-let _proStatus = null; // null = not yet loaded, true = Pro, false = Free
-
-function renderPlanStatus({ isPro }) {
-  _proStatus = isPro;
-
-  if (isPro) {
-    planBadge.textContent = 'PRO';
-    planBadge.className   = 'plan-badge pro';
-    planLabel.textContent = 'Pro plan — unlimited relists';
-    planSub.textContent   = '';
-    planBarBg.style.display  = 'none';
-    btnUpgrade.style.display = 'none';
-    btnRelistAll.disabled    = false;
-    btnRelistAll.title       = '';
-  } else {
-    planBadge.textContent = 'FREE';
-    planBadge.className   = 'plan-badge free';
-    planLabel.textContent = 'Free plan — top 4 listings unlocked';
-    planSub.textContent   = 'Listings 5+ are locked · upgrade for unlimited';
-    planBarBg.style.display  = 'none';
-    btnUpgrade.style.display = '';
-    btnRelistAll.title       = 'Pro feature — upgrade for bulk relist';
-  }
-}
-
-function loadPlanStatus() {
-  chrome.runtime.sendMessage({ kind: 'CHECK_PRO' }, response => {
-    void chrome.runtime.lastError; // swallow if SW isn't awake yet
-    if (response) {
-      renderPlanStatus(response);
-      applyArProGating(response.isPro);
+function loadStats() {
+  chrome.storage.local.get(['relistCount', 'relistCountDate'], data => {
+    const today = new Date().toISOString().slice(0, 10);
+    const count = data.relistCountDate === today ? (data.relistCount || 0) : 0;
+    if (count > 0) {
+      statsBar.textContent   = `${count} relisted today`;
+      statsBar.style.display = '';
+    } else {
+      statsBar.style.display = 'none';
     }
   });
 }
 
 // ── Init ──────────────────────────────────────────────────────────────────────
-
-// ── Auto-Relist section ───────────────────────────────────────────────────────
-
-function updateArVisibility() {
-  const mode = arMode.value;
-  arDtWrap.style.display = mode === 'onetime' ? '' : 'none';
-  arTWrap.style.display  = mode === 'daily'   ? '' : 'none';
-  arWdWrap.style.display = mode === 'weekly'  ? '' : 'none';
-  arHWrap.style.display  = mode === 'interval' ? '' : 'none';
-}
-
-function applyArProGating(isPro) {
-  if (isPro) {
-    arProBadge.style.display = 'none';
-    [arMode, arDatetime, arTime, arWeekday, arHours, arAiToggle, arEnabled, btnArSave]
-      .forEach(el => { if (el) el.disabled = false; });
-  } else {
-    arProBadge.style.display = '';
-    [arMode, arDatetime, arTime, arWeekday, arHours, arAiToggle, arEnabled, btnArSave]
-      .forEach(el => { if (el) el.disabled = true; });
-  }
-}
-
-function loadArSettings() {
-  chrome.storage.local.get('fbr_settings', result => {
-    const s = result.fbr_settings || {};
-    arMode.value          = s.scheduleMode       || 'interval';
-    arDatetime.value      = s.scheduleMode === 'onetime' ? (s.scheduleDateTime || '') : '';
-    arTime.value          = (s.scheduleMode === 'daily' || s.scheduleMode === 'weekly') ? (s.scheduleDateTime || '') : '';
-    arWeekday.value       = s.scheduleWeekday    != null ? String(s.scheduleWeekday) : '1';
-    arHours.value         = s.scheduleEveryHours || 24;
-    arAiToggle.checked    = !!s.aiEnhanceOnRelist;
-    arEnabled.checked     = !!s.scheduleEnabled;
-    updateArVisibility();
-  });
-}
-
-arMode.addEventListener('change', updateArVisibility);
-
-btnArSave.addEventListener('click', () => {
-  if (_proStatus === false) {
-    chrome.runtime.sendMessage({ kind: 'OPEN_PAYMENT_PAGE' });
-    return;
-  }
-  chrome.storage.local.get('fbr_settings', result => {
-    const s = Object.assign({}, result.fbr_settings || {});
-    s.scheduleMode       = arMode.value;
-    s.scheduleEveryHours = parseInt(arHours.value, 10) || 24;
-    s.aiEnhanceOnRelist  = arAiToggle.checked;
-    s.scheduleEnabled    = arEnabled.checked;
-    if (arMode.value === 'onetime') {
-      s.scheduleDateTime = arDatetime.value;
-    } else if (arMode.value === 'daily' || arMode.value === 'weekly') {
-      s.scheduleDateTime = arTime.value;
-    } else {
-      s.scheduleDateTime = '';
-    }
-    s.scheduleWeekday = parseInt(arWeekday.value, 10) || 1;
-    chrome.storage.local.set({ fbr_settings: s }, () => {
-      chrome.runtime.sendMessage({ kind: 'SYNC_ALARM' });
-      const orig = btnArSave.textContent;
-      btnArSave.textContent = 'Saved ✓';
-      setTimeout(() => { btnArSave.textContent = orig; }, 2000);
-    });
-  });
-});
-
-// Pro-gate: clicking any disabled AR field opens the upgrade page
-[arMode, arDatetime, arTime, arWeekday, arHours, arAiToggle, arEnabled, btnArSave].forEach(el => {
-  if (!el) return;
-  el.addEventListener('click', () => {
-    if (el.disabled) chrome.runtime.sendMessage({ kind: 'OPEN_PAYMENT_PAGE' });
-  });
-});
 
 function init() {
   chrome.storage.local.get(['status', 'statusTime', 'lastNewId'], data => {
@@ -310,8 +189,7 @@ function init() {
 
   detectPage();
   checkCacheStatus();
-  loadPlanStatus();
-  loadArSettings();
+  loadStats();
 
   // Refresh relative timestamps every 20s while popup is open
   setInterval(() => {
@@ -328,21 +206,14 @@ chrome.storage.onChanged.addListener((changes, area) => {
     if (changes.lastNewId) _lastNewId = changes.lastNewId.newValue || null;
     chrome.storage.local.get(['status', 'statusTime'], data => {
       renderStatus(data.status, data.statusTime);
-      syncBulkButtonState(data.status || '');
     });
   }
-  if (changes.fbr_tokens_v1) {
+  if (changes.fbr_tokens_v1 || changes.fbr_docids_v1) {
     checkCacheStatus();
   }
-  if (changes.fbr_settings) {
-    loadArSettings();
+  if (changes.relistCount || changes.relistCountDate) {
+    loadStats();
   }
-});
-
-// ── Upgrade button ────────────────────────────────────────────────────────────
-
-btnUpgrade.addEventListener('click', () => {
-  chrome.runtime.sendMessage({ kind: 'OPEN_PAYMENT_PAGE' });
 });
 
 // ── CTA button ────────────────────────────────────────────────────────────────
@@ -365,73 +236,6 @@ btnClear.addEventListener('click', () => {
       btnClear.classList.remove('done');
     }, 2000);
   });
-});
-
-// ── Relist all live ───────────────────────────────────────────────────────────
-
-let _bulkRunning = false;
-
-function setBulkRunning(running) {
-  _bulkRunning = running;
-  btnRelistAll.disabled = running;
-  if (running) {
-    btnRelistAll.textContent = 'Running…';
-  } else {
-    // Restore original content with icon
-    btnRelistAll.innerHTML = `
-      <svg width="12" height="12" viewBox="0 0 20 20" fill="none">
-        <path d="M3.5 10a6.5 6.5 0 0 1 11.18-4.5H12a.75.75 0 0 0 0 1.5h3.75c.414 0 .75-.336.75-.75V2.5a.75.75 0 0 0-1.5 0v1.94A8 8 0 1 0 18 10a.75.75 0 0 0-1.5 0A6.5 6.5 0 0 1 3.5 10z" fill="currentColor"/>
-      </svg>
-      Relist all live`;
-  }
-}
-
-// Sync button state with live status updates while popup is open
-function syncBulkButtonState(statusText) {
-  if (!statusText) return;
-  const isBusy = /^(Reading|Photos|Posting|Verifying|Condition|Deleting|Fetching listings|Relisting \d)/.test(statusText);
-  if (isBusy && !_bulkRunning) {
-    setBulkRunning(true);
-  } else if (!isBusy && _bulkRunning) {
-    setBulkRunning(false);
-  }
-}
-
-btnRelistAll.addEventListener('click', () => {
-  if (_bulkRunning) return;
-
-  // Free tier gate: open payment page instead of relisting
-  if (_proStatus === false) {
-    chrome.runtime.sendMessage({ kind: 'OPEN_PAYMENT_PAGE' });
-    return;
-  }
-
-  setBulkRunning(true);
-  chrome.runtime.sendMessage({ kind: 'RELIST_ALL' }, result => {
-    void chrome.runtime.lastError; // swallow to avoid unchecked-error warning
-    setBulkRunning(false);         // always reset — even if SW died and result is undefined
-    if (result && !result.ok) {
-      if (result.proRequired) {
-        // Pro check failed server-side too — open upgrade page
-        chrome.runtime.sendMessage({ kind: 'OPEN_PAYMENT_PAGE' });
-      } else {
-        console.warn('[Popup] RELIST_ALL error:', result.error);
-      }
-    }
-  });
-});
-
-// ── Options page ──────────────────────────────────────────────────────────────
-
-btnOptions.addEventListener('click', () => {
-  chrome.runtime.openOptionsPage();
-});
-
-// ── Feedback link ─────────────────────────────────────────────────────────────
-
-document.getElementById('btn-feedback').addEventListener('click', e => {
-  e.preventDefault();
-  chrome.tabs.create({ url: FEATURE_REQUEST_URL });
 });
 
 init();

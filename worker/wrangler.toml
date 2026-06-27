@@ -1,0 +1,19 @@
+name            = "fbr-ai-proxy"
+main            = "src/worker.js"
+compatibility_date = "2024-11-01"
+account_id      = "61feca94a38b559d2a901414855d8f49"
+
+# Route: intercept /api/* on relist.nowoly.com only — never relist.nowoly.com/*
+# (landing page and other routes pass through to the Oracle origin unchanged)
+[[routes]]
+pattern = "relist.nowoly.com/api/*"
+zone_id = "eea1c495df615520a404d037d232d068"
+
+# Secrets (not set here — use wrangler secret put):
+#   GEMINI_KEY  — Gemini API key (currently: POY_GEMINI_API_KEY_FREE)
+#   FBR_TOKEN   — Shared auth token for X-FBR-Token header
+#
+# TO SWAP TO PAID KEY LATER:
+#   CLOUDFLARE_API_TOKEN=$CF_TOKEN wrangler secret put GEMINI_KEY
+#   (paste POY_GEMINI_API_KEY_PAID when prompted — no redeployment needed,
+#    secret takes effect on next request after propagation ~30s)

@@ -1,17 +1,27 @@
 {
   "manifest_version": 3,
-  "name": "FB Marketplace Relister",
-  "version": "2.1.0",
-  "description": "Relists Facebook Marketplace items via direct API — no UI interaction required.",
+  "name": "Relist for Facebook Marketplace",
+  "version": "3.7.7",
+  "description": "Relist your Facebook Marketplace listings in one click — single, bulk or scheduled. Keeps photos, price, location & condition.",
   "permissions": [
     "storage",
     "tabs",
     "scripting",
-    "activeTab"
+    "alarms"
   ],
   "host_permissions": [
-    "*://*.facebook.com/*"
+    "*://*.facebook.com/*",
+    "https://upload.facebook.com/*",
+    "https://*.fbcdn.net/*",
+    "https://*.xx.fbcdn.net/*",
+    "https://generativelanguage.googleapis.com/*",
+    "https://relist.nowoly.com/*"
   ],
+  "icons": {
+    "16": "icon-16.png",
+    "48": "icon-48.png",
+    "128": "icon-128.png"
+  },
   "background": {
     "service_worker": "background.js"
   },
@@ -24,6 +34,12 @@
   ],
   "action": {
     "default_popup": "popup.html",
-    "default_title": "FB Marketplace Relister"
-  }
+    "default_title": "Marketplace Relister",
+    "default_icon": {
+      "16": "icon-16.png",
+      "48": "icon-48.png",
+      "128": "icon-128.png"
+    }
+  },
+  "options_page": "options.html"
 }

@@ -1,0 +1,6 @@
+proxy/licenses.json
+proxy/proxy.env
+proxy/pending-subs.json
+proxy/telemetry.json
+dist/
+node_modules/

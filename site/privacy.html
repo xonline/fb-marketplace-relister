@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Privacy Policy — Marketplace Relister</title>
+<meta name="description" content="Privacy Policy for the Marketplace Relister Chrome extension. Your data stays in your browser." />
+
+<!-- ============================================================
+     GA4 — PLACEHOLDER: Replace G-RELISTXXXX with the real
+     Measurement ID from the GA4 property created for
+     relist.nowoly.com before going live.
+
+     NOTE: SRI (integrity="sha384-...") is intentionally omitted.
+     Google rotates gtag.js content on every deploy; a pinned hash
+     would silently break analytics on the next update. This is a
+     documented exception to SRI — see https://csp.withgoogle.com/
+     ============================================================ -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-RELISTXXXX"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+  gtag('config', 'G-RELISTXXXX');
+</script>
+
+<style>
+  :root{
+    --bg:#FFFFFF; --soft:#F8FAFC; --ink:#0F172A; --slate:#475569; --muted:#64748B;
+    --blue:#1877F2; --blue-d:#1668D6; --green:#16A34A; --amber:#D97706; --border:#E2E8F0;
+    --r:14px; --max:1080px;
+  }
+  *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+  html{scroll-behavior:smooth}
+  body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Inter,system-ui,sans-serif;background:var(--bg);color:var(--ink);line-height:1.7;-webkit-font-smoothing:antialiased}
+  a{color:var(--blue);text-decoration:none}
+  a:hover{text-decoration:underline}
+  .wrap{max-width:var(--max);margin:0 auto;padding:0 22px}
+  .btn{display:inline-flex;align-items:center;gap:8px;font-weight:700;border-radius:10px;padding:13px 22px;font-size:15px;cursor:pointer;border:none;transition:transform .1s,opacity .15s,background .15s}
+  .btn:active{transform:scale(.98)}
+  .btn-primary{background:var(--blue);color:#fff}
+  .btn-primary:hover{background:var(--blue-d)}
+
+  /* Nav */
+  nav{position:sticky;top:0;z-index:50;background:rgba(255,255,255,.85);backdrop-filter:blur(10px);border-bottom:1px solid var(--border)}
+  nav .wrap{display:flex;align-items:center;justify-content:space-between;height:62px}
+  .brand{display:flex;align-items:center;gap:10px;font-weight:800;font-size:16px;color:var(--ink);text-decoration:none}
+  .brand img{width:30px;height:30px;border-radius:8px}
+
+  /* Page header */
+  .page-header{background:linear-gradient(180deg,#F0F6FF 0%,#fff 70%);padding:60px 0 48px;border-bottom:1px solid var(--border)}
+  .page-header h1{font-size:38px;font-weight:850;letter-spacing:-.02em;margin-bottom:8px}
+  .page-header .meta{color:var(--muted);font-size:14px}
+
+  /* Content */
+  .content{max-width:760px;margin:0 auto;padding:52px 22px 80px}
+  .content h2{font-size:22px;font-weight:800;margin:36px 0 12px;padding-top:8px;border-top:1px solid var(--border)}
+  .content h2:first-child{border-top:none;margin-top:0}
+  .content h3{font-size:16px;font-weight:750;margin:24px 0 8px;color:var(--ink)}
+  .content p{color:var(--slate);font-size:15px;margin-bottom:14px}
+  .content ul,.content ol{color:var(--slate);font-size:15px;padding-left:22px;margin-bottom:14px;display:flex;flex-direction:column;gap:6px}
+  .content strong{color:var(--ink);font-weight:700}
+  .callout{background:#EFF6FF;border:1px solid #BFDBFE;border-radius:10px;padding:16px 20px;margin:20px 0}
+  .callout p{margin:0;color:var(--ink);font-size:14.5px}
+
+  /* Permission table */
+  .perm-table{width:100%;border-collapse:collapse;margin:16px 0 20px;font-size:14px}
+  .perm-table th{background:var(--soft);text-align:left;padding:10px 14px;font-weight:700;color:var(--ink);border:1px solid var(--border)}
+  .perm-table td{padding:10px 14px;border:1px solid var(--border);color:var(--slate);vertical-align:top}
+  .perm-table td:first-child{font-family:ui-monospace,monospace;font-size:12.5px;color:var(--ink);white-space:nowrap}
+
+  footer{background:var(--soft);border-top:1px solid var(--border);padding:40px 0;text-align:center;color:var(--muted);font-size:13px}
+  footer a{color:var(--slate);font-weight:600}
+  .disclaimer{max-width:620px;margin:14px auto 0;font-size:12px;color:var(--muted)}
+</style>
+</head>
+<body>
+
+<nav><div class="wrap">
+  <a class="brand" href="index.html"><img src="icon-128.png" alt="Marketplace Relister"/> Marketplace Relister</a>
+  <a class="btn btn-primary" href="index.html#get">Add to Chrome</a>
+</div></nav>
+
+<div class="page-header"><div class="wrap">
+  <h1>Privacy Policy</h1>
+  <p class="meta">Last updated: 2026-06-27 &nbsp;·&nbsp; Developer: Poy (x-online) &nbsp;·&nbsp; <a href="mailto:poy@x-online.com.au">poy@x-online.com.au</a></p>
+</div></div>
+
+<div class="content">
+
+  <div class="callout">
+    <p><strong>Short answer:</strong> Almost everything stays on your device. The only data that ever leaves your browser is when you use the optional AI listing enhancement feature — your listing text and optionally a photo are sent to our server (<code>relist.nowoly.com</code>), which forwards them to Google Gemini to generate copy. We do not store that data. Pro subscriptions are handled entirely by Stripe — we never see your card details. This landing page uses Google Analytics 4; the browser extension itself does not.</p>
+  </div>
+
+  <h2>1. Overview</h2>
+  <p>Marketplace Relister ("the Extension") is a Chrome browser extension that allows you to relist your own Facebook Marketplace listings. This Privacy Policy explains what data the Extension accesses, how it is used, and your choices. It covers the Extension itself and this landing page (<code>relist.nowoly.com</code>).</p>
+
+  <h2>2. Data We Access</h2>
+  <h3>2.1 Facebook Marketplace Listing Data</h3>
+  <p>When you use the Extension, it reads the following fields from your Facebook Marketplace listings:</p>
+  <ul>
+    <li>Listing title</li>
+    <li>Listing description</li>
+    <li>Photos (as binary image data to re-upload)</li>
+    <li>Category</li>
+    <li>Price and currency</li>
+    <li>Location</li>
+    <li>Item condition (e.g. Used – Good)</li>
+  </ul>
+  <p><strong>This data is accessed solely to perform the relist action you requested.</strong> It is read from the Facebook page currently open in your browser, processed in memory within the Extension, and submitted back to Facebook's API to create a refreshed listing. It is not stored beyond the immediate operation, not logged, and not used for any purpose other than completing your relist.</p>
+  <p>The only exception is when you use the optional AI listing enhancement feature — see Section 3.</p>
+
+  <h3>2.2 Extension Settings</h3>
+  <p>The Extension stores your preferences (e.g. scheduled relist interval, whether AI enhance is enabled, Pro subscription status) in Chrome's local extension storage (<code>chrome.storage.local</code>). This data:</p>
+  <ul>
+    <li>Stays on your device only.</li>
+    <li>Is never transmitted to any server we operate.</li>
+    <li>Is never shared with third parties.</li>
+    <li>Can be cleared at any time via the Extension's Options page or via <code>chrome://extensions</code>.</li>
+  </ul>
+
+  <h2>3. Optional AI Listing Enhancement</h2>
+  <p>The Extension includes an <strong>optional, opt-in</strong> feature that uses Google's Gemini AI to improve your listing title and description. This feature is <strong>disabled by default</strong>. You must explicitly enable it in the Options page.</p>
+
+  <h3>3.1 Provided AI (Pro — included with subscription)</h3>
+  <p>Pro subscribers can use AI enhancement powered by our server. When this mode is active and you relist a listing:</p>
+  <ul>
+    <li>Your listing <strong>title</strong>, <strong>price</strong>, <strong>description</strong>, and optionally one <strong>listing photo</strong> are sent over HTTPS to our server at <code>relist.nowoly.com/api/ai</code>.</li>
+    <li>Our server forwards this data to the <strong>Google Gemini API</strong> to generate improved listing copy, then returns the result to your browser.</li>
+    <li><strong>We do not store your listing content beyond the duration of the API request.</strong> The data is processed in memory and discarded once the response is returned to you.</li>
+    <li>We do not sell, share, or use your listing data for any purpose other than generating the AI response you requested.</li>
+    <li>The listing data is transmitted and processed using HTTPS (TLS encryption) at all stages.</li>
+    <li>Google's handling of data forwarded through our server is subject to <a href="https://policies.google.com/privacy" target="_blank" rel="noopener">Google's Privacy Policy</a> and <a href="https://ai.google.dev/terms" target="_blank" rel="noopener">Google AI Terms of Service</a>.</li>
+  </ul>
+
+  <h3>3.2 Bring-Your-Own-Key (BYOK) Mode</h3>
+  <p>Alternatively, you may provide your own Google Gemini API key. In this mode:</p>
+  <ul>
+    <li>Your listing title, description, and optionally a photo are sent <strong>directly from your browser</strong> to the Google Gemini API (<code>generativelanguage.googleapis.com</code>).</li>
+    <li>Your API key is stored in <code>chrome.storage.local</code> on your device and sent directly to Google — it never passes through our server.</li>
+    <li>We never see, store, or transmit your API key.</li>
+    <li>The Gemini API is subject to <a href="https://policies.google.com/privacy" target="_blank" rel="noopener">Google's Privacy Policy</a> and <a href="https://ai.google.dev/terms" target="_blank" rel="noopener">Google AI Terms of Service</a>. Please review those before enabling this feature.</li>
+  </ul>
+
+  <p><strong>If you do not enable AI enhancement, no listing data is sent to our server or to Google.</strong></p>
+
+  <h2>4. Permissions Used and Why</h2>
+  <table class="perm-table">
+    <thead><tr><th>Permission</th><th>Purpose</th></tr></thead>
+    <tbody>
+      <tr><td>storage</td><td>Saves your settings (schedule, AI toggle, subscription status) locally in Chrome's extension storage.</td></tr>
+      <tr><td>tabs</td><td>Opens and identifies the Facebook Marketplace selling page needed to perform relist operations.</td></tr>
+      <tr><td>scripting</td><td>Injects code into your active Facebook tab to read authentication tokens and perform GraphQL API calls in page context — required because Facebook's API rejects requests from the extension's background worker.</td></tr>
+      <tr><td>activeTab</td><td>Reads content from the currently active Facebook tab when you initiate a relist.</td></tr>
+      <tr><td>alarms</td><td>Powers the scheduled auto-relist feature — fires background tasks at the interval you configure.</td></tr>
+      <tr><td>*://*.facebook.com/*</td><td>Read page tokens and submit relist GraphQL mutations to Facebook's internal API.</td></tr>
+      <tr><td>https://upload.facebook.com/*</td><td>Re-upload listing photos so they receive fresh photo IDs for the new listing.</td></tr>
+      <tr><td>https://*.fbcdn.net/*<br/>https://*.xx.fbcdn.net/*</td><td>Fetch listing photo data from Facebook's CDN for re-uploading.</td></tr>
+      <tr><td>https://generativelanguage.googleapis.com/*</td><td>Send listing content directly to Google Gemini (BYOK mode only — requires your own API key).</td></tr>
+      <tr><td>https://relist.nowoly.com/*</td><td>Send listing content to our AI relay endpoint (Provided AI mode for Pro subscribers) and verify Pro subscription status via your anonymous license identifier.</td></tr>
+    </tbody>
+  </table>
+
+  <h2>5. Payments via Stripe</h2>
+  <p>Pro subscriptions are processed entirely by <strong>Stripe</strong>.</p>
+  <ul>
+    <li>Payment is handled entirely by Stripe — we never receive, see, or store your credit card or payment details.</li>
+    <li>We store only an anonymous license identifier (a random UUID generated by the extension) linked to your subscription status (active/inactive). This allows the extension to verify your Pro status. The license identifier is not linked to your name or email by us.</li>
+    <li>Your payment data is governed by <a href="https://stripe.com/privacy" target="_blank" rel="noopener">Stripe's Privacy Policy</a>.</li>
+    <li>To cancel your subscription, use the Stripe billing portal link from your purchase receipt, or contact us via the feedback form in the extension.</li>
+  </ul>
+
+  <h2>6. Website Analytics (Landing Page)</h2>
+  <p>This landing page (<code>relist.nowoly.com</code>) uses <strong>Google Analytics 4 (GA4)</strong> to collect anonymised usage data — page views, referral sources, and general device/browser information. This data helps us understand how visitors find and use the site.</p>
+  <ul>
+    <li>GA4 sets cookies in your browser to track sessions across page views.</li>
+    <li>Data collected is anonymised and aggregated; we do not use it to identify individual visitors.</li>
+    <li>This analytics is on the <strong>landing page only</strong> — the Chrome extension does not include any analytics, tracking, or telemetry code.</li>
+    <li>Google Analytics is governed by <a href="https://policies.google.com/privacy" target="_blank" rel="noopener">Google's Privacy Policy</a>. You can opt out via <a href="https://tools.google.com/dlpage/gaoptout" target="_blank" rel="noopener">Google Analytics Opt-out Browser Add-on</a>.</li>
+  </ul>
+
+  <h2>7. Data We Do Not Collect</h2>
+  <p>We explicitly do <strong>not</strong>:</p>
+  <ul>
+    <li>Store listing content, photos, or any Facebook data — AI relay requests are processed in memory and discarded.</li>
+    <li>Sell, rent, or share any data with advertisers or third parties.</li>
+    <li>Track which listings you relist or how often you use the Extension.</li>
+    <li>Collect analytics or telemetry from within the Extension itself.</li>
+    <li>Use remote code execution or load scripts from external servers into the Extension.</li>
+    <li>Store your credit card or payment information — payments are handled entirely by Stripe.</li>
+  </ul>
+
+  <h2>8. Local Processing</h2>
+  <p>All core Extension logic (reading listings, performing relists, scheduling) runs locally inside your Chrome browser. The Extension communicates directly with Facebook's own API on your behalf using your existing Facebook session.</p>
+  <p>The only server-side component is the optional AI relay (<code>relist.nowoly.com/api/ai</code>), used only when you enable Provided AI mode. That endpoint processes requests in memory without logging or storing listing content.</p>
+
+  <h2>9. Children's Privacy</h2>
+  <p>This Extension is not directed at children under 13 and we do not knowingly collect personal information from children.</p>
+
+  <h2>10. Changes to This Policy</h2>
+  <p>We may update this Privacy Policy from time to time. The "Last updated" date at the top will reflect any changes. Continued use of the Extension after changes constitutes acceptance of the updated policy. For significant changes, we will update the Extension's store listing.</p>
+
+  <h2>11. Contact</h2>
+  <p>If you have questions about this Privacy Policy, please contact:</p>
+  <p><strong>Email:</strong> <a href="mailto:poy@x-online.com.au">poy@x-online.com.au</a></p>
+
+  <h2>12. Disclaimer</h2>
+  <p>This Extension is an independent tool created by a third-party developer. It is not affiliated with, endorsed by, or in any way officially connected with Meta Platforms, Inc. or Facebook. "Facebook" and "Marketplace" are trademarks of Meta Platforms, Inc.</p>
+
+</div>
+
+<footer><div class="wrap">
+  <div class="brand" style="justify-content:center;display:flex;align-items:center;gap:10px;font-weight:800;font-size:16px;color:var(--ink)"><img src="icon-128.png" alt="" style="width:30px;height:30px;border-radius:8px"/> Marketplace Relister</div>
+  <p style="margin-top:14px"><a href="index.html">Home</a> · <a href="privacy.html">Privacy Policy</a> · <a href="mailto:poy@x-online.com.au">Support</a></p>
+  <p class="disclaimer">Not affiliated with, endorsed by, or sponsored by Meta Platforms, Inc. Facebook® and Facebook Marketplace™ are trademarks of Meta. Use in accordance with Facebook's terms.</p>
+  <p style="margin-top:14px">© 2026 Marketplace Relister</p>
+</div></footer>
+
+</body>
+</html>

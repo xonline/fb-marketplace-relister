@@ -1,0 +1,721 @@
+'use strict';
+
+// content.js v2.3.6 — Direct Facebook GraphQL API (no UI form interaction)
+// Runs only on: /marketplace/you/selling
+
+const SELLING_URL = 'https://www.facebook.com/marketplace/you/selling';
+const RELIST_CLASS = 'fbr-relist-btn';
+
+// ─── State ────────────────────────────────────────────────────────────────────
+let _tokens = null;
+let _docIds = null;
+let _relistInProgress = false;
+
+// ─── Tokens / DocIDs (via background) ────────────────────────────────────────
+
+async function getTokens() {
+  if (_tokens) return _tokens;
+  const result = await chrome.runtime.sendMessage({ kind: 'GET_TOKENS' });
+  if (result?.error) throw new Error(result.error);
+  _tokens = result;
+  return _tokens;
+}
+
+async function getDocIds(listingId) {
+  if (_docIds) return _docIds;
+  const result = await chrome.runtime.sendMessage({ kind: 'GET_DOC_IDS', listingId });
+  if (result?.error) throw new Error(result.error);
+  _docIds = result;
+  return _docIds;
+}
+
+// ─── GraphQL ──────────────────────────────────────────────────────────────────
+
+function isAuthError(text) {
+  return text.includes('"error_code":1357004') ||
+         text.includes('"error_code":190')     ||
+         text.includes('OAuthException')        ||
+         text.includes('Session has expired');
+}
+
+async function fbGraphQL(referrer, docId, mutationName, variables, _retry = 0) {
+  const t = await getTokens();
+  const body = new URLSearchParams({
+    av:                       t.user_id,
+    __a:                      '1',
+    __comet_req:              '1',
+    fb_dtsg:                  t.fb_dtsg,
+    fb_api_caller_class:      'RelayModern',
+    fb_api_req_friendly_name: mutationName,
+    variables:                JSON.stringify(variables),
+    doc_id:                   docId
+  }).toString();
+
+  let res;
+  try {
+    res = await fetch('https://www.facebook.com/api/graphql/', {
+      method: 'POST',
+      headers: { accept: '*/*', 'content-type': 'application/x-www-form-urlencoded' },
+      referrer,
+      referrerPolicy: 'strict-origin-when-cross-origin',
+      body,
+      mode: 'cors',
+      credentials: 'include'
+    });
+  } catch (netErr) {
+    if (_retry < 2) {
+      await new Promise(r => setTimeout(r, (1 + _retry) * 1000));
+      return fbGraphQL(referrer, docId, mutationName, variables, _retry + 1);
+    }
+    throw netErr;
+  }
+
+  if (res.status >= 500 && _retry < 2) {
+    await new Promise(r => setTimeout(r, (1 + _retry) * 1000));
+    return fbGraphQL(referrer, docId, mutationName, variables, _retry + 1);
+  }
+
+  const text = await res.text();
+
+  if (isAuthError(text)) {
+    _tokens = null;
+    _docIds = null;
+    chrome.runtime.sendMessage({ kind: 'CLEAR_CACHE' }).catch(() => {});
+    throw new Error('Facebook session expired — please refresh and try again');
+  }
+
+  // Strip FB's anti-CSRF prefix: "for (;;);" or "while(1);"
+  const clean = text.replace(/^(?:for\s*\(;;\)|while\s*\(1\));/, '').trim();
+  // FB sometimes returns multiple newline-separated JSON objects — take first with data/errors
+  for (const line of clean.split('\n')) {
+    const l = line.trim();
+    if (!l) continue;
+    try {
+      const parsed = JSON.parse(l);
+      if (parsed.data !== undefined || parsed.errors !== undefined) return parsed;
+    } catch {}
+  }
+  try {
+    return JSON.parse(clean);
+  } catch {
+    throw new Error('Could not parse GraphQL response');
+  }
+}
+
+// ─── Deep JSON search ─────────────────────────────────────────────────────────
+
+function deepFind(obj, key, seen) {
+  if (!obj || typeof obj !== 'object') return null;
+  if (!seen) seen = new Set();
+  if (seen.has(obj)) return null;
+  seen.add(obj);
+  if (Object.prototype.hasOwnProperty.call(obj, key)) return obj[key];
+  for (const v of Object.values(obj)) {
+    const found = deepFind(v, key, seen);
+    if (found != null) return found;
+  }
+  return null;
+}
+
+// Collect EVERY occurrence of a key (not just the first). The item-page HTML contains
+// multiple `marketplace_product_details_page` nodes — an early SSR stub (no price/location,
+// description as an object) and a later fully-hydrated one. deepFind returns the stub and
+// stops; we need them all so we can choose the complete node (mirrors Relistify's extractor).
+function deepFindAll(obj, key, seen, out) {
+  if (!seen) { seen = new Set(); out = []; }
+  if (!obj || typeof obj !== 'object' || seen.has(obj)) return out;
+  seen.add(obj);
+  if (Object.prototype.hasOwnProperty.call(obj, key)) out.push(obj[key]);
+  for (const v of Object.values(obj)) deepFindAll(v, key, seen, out);
+  return out;
+}
+
+// redacted_description may be a plain string OR a {text} object depending on which node we hit.
+function extractText(v) {
+  if (v == null) return '';
+  if (typeof v === 'string') return v;
+  if (typeof v === 'object') return String(v.text ?? '');
+  return String(v);
+}
+
+// ─── Read listing data ────────────────────────────────────────────────────────
+
+async function readDetailPage(listingId) {
+  const res = await fetch(`https://www.facebook.com/marketplace/item/${listingId}/`, {
+    method: 'GET',
+    credentials: 'include',
+    referrerPolicy: 'strict-origin-when-cross-origin'
+  });
+  const html = await res.text();
+  const doc  = new DOMParser().parseFromString(html, 'text/html');
+  const scripts = Array.from(doc.getElementsByTagName('script'))
+    .filter(s => s.type === 'application/json');
+
+  const DETAIL_KEYS = [
+    'marketplace_product_details_page',
+    'marketplace_listing_for_sale_item',
+    'marketplace_for_sale_item',
+    'marketplace_product_page',
+  ];
+
+  // Collect ALL candidate nodes across every script tag and key, then pick the COMPLETE one.
+  const candidates = [];
+  for (const s of scripts) {
+    try {
+      const data = JSON.parse(s.textContent || '{}');
+      for (const key of DETAIL_KEYS) {
+        for (const node of deepFindAll(data, key)) {
+          if (node) candidates.push(node);
+        }
+      }
+    } catch {}
+  }
+  if (!candidates.length) return null;
+
+  // Prefer a node whose target has a real price AND location — that's the hydrated one.
+  // Iterate in document order and keep the LAST qualifying match (most-hydrated wins).
+  const hasPrice = n => n?.target?.listing_price?.amount != null;
+  const hasLoc   = n => n?.target?.location?.latitude != null;
+  let best = candidates[candidates.length - 1]; // Relistify default: last occurrence
+  for (const n of candidates) {
+    if (hasPrice(n) && hasLoc(n)) best = n;
+  }
+  if (!hasPrice(best)) {
+    for (const n of candidates) { if (hasPrice(n)) best = n; }
+  }
+  return best;
+}
+
+async function readComposerData(listingId, ids) {
+  if (!ids.read_id) return null;
+  try {
+    const json = await fbGraphQL(
+      SELLING_URL,
+      ids.read_id,
+      'CometMarketplaceComposerRootComponentQuery',
+      {
+        listingId,
+        is_edit: true,
+        composer_mode: 'EDIT_LISTING',
+        scale: 1,
+        prefill_id: '0',
+        category_id: '0',
+        has_prefill_data: false,
+        has_prefetched_category: false,
+        delivery_types: ['in_person']
+      }
+    );
+    return json?.data?.listing ?? null;
+  } catch (e) {
+    console.warn('[Relister] Composer query failed — using detail page only:', e.message);
+    return null;
+  }
+}
+
+// ─── Build create-mutation payload ───────────────────────────────────────────
+
+function parsePrice(amount) {
+  // Strip locale commas (e.g. "1,234") before dropping decimals
+  return String(amount ?? '0').replace(/,/g, '').replace(/\.\d+$/, '');
+}
+
+function buildListingData(detail, composer) {
+  const target = detail?.target ?? {};
+  const c      = composer ?? {};
+
+  const categoryId = String(
+    c.marketplace_listing_virtual_taxonomy_category?.id ??
+    c.marketplace_listing_category_id ??
+    target.marketplace_listing_category_id ??
+    ''
+  );
+
+  const title       = String(c.marketplace_listing_title ?? target.marketplace_listing_title ?? '');
+  const description = extractText(c.redacted_description ?? target.redacted_description ?? target.description);
+  const price       = parsePrice(target.listing_price?.amount ?? c.listing_price?.amount);
+  const currency    = String(target.listing_price?.currency ?? c.listing_price?.currency ?? 'USD');
+  // Prefer composer location (correctly shaped), fall back to detail page. Guard against NaN —
+  // JSON.stringify turns NaN into null, which fails coercion on FB's non-null Float fields.
+  const latRaw      = Number(c.location?.latitude  ?? target.location?.latitude  ?? 0);
+  const lonRaw      = Number(c.location?.longitude ?? target.location?.longitude ?? 0);
+  const latitude    = Number.isFinite(latRaw) ? latRaw : 0;
+  const longitude   = Number.isFinite(lonRaw) ? lonRaw : 0;
+
+  const rawPhotos = c.listing_photos ?? target.listing_photos ?? null;
+  let photoSources;
+  if (!rawPhotos) {
+    photoSources = [];
+  } else if (Array.isArray(rawPhotos)) {
+    photoSources = rawPhotos;
+  } else {
+    photoSources = (rawPhotos.edges ?? []).map(e => e?.node ?? e).filter(Boolean)
+      .concat(rawPhotos.nodes ?? []);
+  }
+  const photoIds = photoSources.map(p => String(p?.id ?? '')).filter(Boolean);
+
+  // hidden_from_friends_visibility is a STRICT enum: only HIDDEN_FROM_FRIENDS / NOT_HIDDEN_FROM_FRIENDS.
+  // The detail page's `hidden_from_friends_visibility` actually holds the *audience* enum
+  // (e.g. "VISIBLE_TO_EVERYONE") — a different enum, which fails GraphQL coercion
+  // (noncoercible_variable_value). Read the boolean `hidden_from_friends` instead, and
+  // whitelist the output so only the two valid enum values can ever be sent.
+  const rawHidden = c.hidden_from_friends ?? target.hidden_from_friends;
+  const hiddenFromFriends =
+    rawHidden === true                         ? 'HIDDEN_FROM_FRIENDS'     :
+    rawHidden === false                        ? 'NOT_HIDDEN_FROM_FRIENDS' :
+    rawHidden === 'HIDDEN_FROM_FRIENDS'        ? 'HIDDEN_FROM_FRIENDS'     :
+    rawHidden === 'NOT_HIDDEN_FROM_FRIENDS'    ? 'NOT_HIDDEN_FROM_FRIENDS' :
+    'NOT_HIDDEN_FROM_FRIENDS';
+
+  // Handle plain array, .edges, or .nodes for hashtags
+  const hashtagSource = c.marketplace_hashtags ?? target.marketplace_hashtags ?? {};
+  const hashtagItems  = Array.isArray(hashtagSource)
+    ? hashtagSource
+    : (hashtagSource.edges ?? hashtagSource.nodes ?? []);
+  const hashtags = hashtagItems.map(h => h.tag_name).filter(Boolean);
+
+  const attrArray = c.attribute_data ?? target.attribute_data ?? [];
+  const vtAttrs   = { vt_attributes_free_form: {}, vt_attributes_normalized: {} };
+  for (const attr of attrArray) {
+    if (attr.attribute_type === 'DYNAMIC' && attr.attribute_id && attr.attribute_value_id) {
+      vtAttrs.vt_attributes_normalized[attr.attribute_id] = attr.attribute_value_id;
+    } else if (attr.attribute_name) {
+      // Non-DYNAMIC attrs go at ROOT level with lowercased key — matches Relistify exactly
+      vtAttrs[attr.attribute_name.toLowerCase()] = attr.value ?? attr.attribute_value ?? '';
+    }
+  }
+
+  // video_ids must be an array of ID strings — never raw objects (objects fail coercion).
+  // Relistify maps pre_recorded_videos → .id; mirror that, accepting either IDs or {id} objects.
+  const rawVideos = c.video_ids ?? c.pre_recorded_videos ?? target.video_ids ?? target.pre_recorded_videos ?? [];
+  const videoIds  = (Array.isArray(rawVideos) ? rawVideos : [])
+    .map(v => (v && typeof v === 'object') ? v.id : v)
+    .filter(Boolean)
+    .map(String);
+
+  const sku = String(c.sku ?? target.sku ?? '1');
+
+  return {
+    title,
+    description,
+    category_id: categoryId,
+    item_price: { currency, price },
+    latitude,
+    longitude,
+    attribute_data_json: JSON.stringify(vtAttrs),
+    delivery_types: c.delivery_types ?? target.delivery_types ?? ['in_person'],
+    hidden_from_friends_visibility: hiddenFromFriends,
+    product_hashtag_names: hashtags,
+    photo_ids: photoIds,
+    video_ids: videoIds,
+    sku,
+    // Composer surface constants required by FB API
+    surface: 'composer',
+    is_preview: false,
+    is_personalization_required: null,
+    personalization_info: null,
+    draft_type: null,
+    quantity: null,
+    cost_per_additional_item: null,
+    comparable_price: 'null',
+    min_acceptable_checkout_offer_price: 'null',
+    suggested_hashtag_names: [],
+    variants: [],
+    xpost_target_ids: [],
+    // Shipping constants (in_person only — all disabled)
+    shipping_offered: false,
+    shipping_cost_option: 'BUYER_PAID_SHIPPING',
+    shipping_price: 'null',
+    shipping_label_price: '0',
+    shipping_label_rate_code: null,
+    shipping_label_rate_type: null,
+    shipping_service_type: null,
+    shipping_package_weight: null,
+    shipping_options_data: [],
+    shipping_calculation_logic_version: null,
+    shipping_cost_range_lower_cost: null,
+    shipping_cost_range_upper_cost: null,
+    commerce_shipping_carrier: null,
+    commerce_shipping_carriers: []
+  };
+}
+
+// ─── Daily session counter ────────────────────────────────────────────────────
+
+async function incrementRelistCount() {
+  const today = new Date().toISOString().slice(0, 10);
+  const data  = await chrome.storage.local.get(['relistCount', 'relistCountDate']);
+  const count = (data.relistCountDate === today ? (data.relistCount || 0) : 0) + 1;
+  await chrome.storage.local.set({ relistCount: count, relistCountDate: today });
+}
+
+// ─── Mutations ────────────────────────────────────────────────────────────────
+
+async function deleteListing(listingId, ids) {
+  const t    = await getTokens();
+  const json = await fbGraphQL(
+    SELLING_URL,
+    ids.delete_id,
+    'useCometMarketplaceForSaleItemDeleteMutation',
+    {
+      input: {
+        client_mutation_id: '-1',
+        actor_id: t.user_id,
+        batch_delete_variants: true,
+        for_sale_item_id: listingId,
+        referral_surface: 'MARKETPLACE_INSIGHTS',
+        surface: 'MARKETPLACE_PAGE_SELLING'
+      }
+    }
+  );
+  if (json?.errors?.length) {
+    console.error('[Relister v2.3.6] Delete errors full payload:', JSON.stringify(json.errors, null, 2));
+    throw new Error('Delete failed: ' + json.errors[0]?.message);
+  }
+}
+
+// Describe the JS type of every field — surfaces the field that fails GraphQL coercion.
+function describeTypes(obj, prefix = '') {
+  const lines = [];
+  for (const [k, v] of Object.entries(obj ?? {})) {
+    const path = prefix ? `${prefix}.${k}` : k;
+    let desc;
+    if (v === null)                       desc = 'null';
+    else if (Array.isArray(v))            desc = `array[${v.length}]` + (v.length ? ` of ${typeof v[0]}` : '');
+    else if (Number.isNaN(v))             desc = 'NaN  ⚠️ (becomes null in JSON)';
+    else if (typeof v === 'object')       desc = 'object';
+    else                                  desc = `${typeof v} = ${JSON.stringify(v)}`;
+    lines.push(`  ${path}: ${desc}`);
+    if (v && typeof v === 'object' && !Array.isArray(v)) lines.push(...describeTypes(v, path).map(l => '  ' + l));
+  }
+  return lines;
+}
+
+async function createListing(listingData, ids) {
+  const t    = await getTokens();
+  const variables = {
+    input: {
+      client_mutation_id: '-1',
+      actor_id: t.user_id,
+      audience: { marketplace: { marketplace_id: t.marketplace_id } },
+      data: { common: listingData }
+    }
+  };
+  const json = await fbGraphQL(
+    'https://www.facebook.com/marketplace/create/item',
+    ids.create_id,
+    'useCometMarketplaceListingCreateMutation',
+    variables
+  );
+  if (json?.errors?.length) {
+    _docIds = null; // bust cached doc IDs on create failure so next attempt re-fetches fresh ones
+    console.group('[Relister v2.3.6] CREATE FAILED — diagnostics');
+    console.error('Full error payload:', JSON.stringify(json.errors, null, 2));
+    console.error('Field types sent (look for ⚠️, null, object, or a number/string mismatch):\n' +
+      describeTypes(listingData).join('\n'));
+    console.error('Exact variables JSON sent:', JSON.stringify(variables));
+    console.groupEnd();
+    throw new Error('Create failed: ' + json.errors[0]?.message);
+  }
+  return json?.data?.marketplace_listing_create?.listing?.id ?? null;
+}
+
+// ─── Relist orchestration ─────────────────────────────────────────────────────
+
+async function relistItem(listingId, btn) {
+  const setStep = (text, state) => {
+    btn.textContent      = text;
+    btn.dataset.state    = state || 'busy';
+    btn.disabled         = (state === 'busy' || state === 'done');
+    btn.style.background = state === 'error' ? '#c62828' : state === 'done' ? '#2e7d32' : '#1877f2';
+    chrome.storage.local.set({ status: text, statusTime: Date.now() });
+  };
+
+  if (_relistInProgress) {
+    btn.textContent = 'Please wait…';
+    setTimeout(() => { btn.textContent = 'Relist'; }, 2000);
+    return;
+  }
+  _relistInProgress = true;
+
+  try {
+    setStep('Loading…', 'busy');
+    const ids = await getDocIds(listingId);
+
+    setStep('Reading…', 'busy');
+    const [detail, composer] = await Promise.all([
+      readDetailPage(listingId),
+      readComposerData(listingId, ids)
+    ]);
+
+    if (!detail && !composer) throw new Error('Could not read listing data — try refreshing FB');
+
+    const listingData = buildListingData(detail, composer);
+    if (!listingData.title)                  throw new Error('Listing has no title');
+    if (!listingData.category_id)            throw new Error('Listing has no category');
+    if (listingData.photo_ids.length === 0)  throw new Error('No photos found — cannot relist');
+
+    // Create first — if delete fails, original listing is still live (no data loss)
+    setStep('Posting…', 'busy');
+    const newId = await createListing(listingData, ids);
+
+    setStep('Deleting…', 'busy');
+    await deleteListing(listingId, ids);
+
+    await incrementRelistCount();
+    await chrome.storage.local.set({
+      status: `Relisted ✓ new ID: ${newId}`,
+      statusTime: Date.now(),
+      lastNewId: newId
+    });
+
+    setStep('Done ✓', 'done');
+    _relistInProgress = false;
+    setTimeout(() => location.reload(), 2000);
+
+  } catch (e) {
+    _relistInProgress = false;
+    btn.textContent      = 'Error ✗';
+    btn.dataset.state    = 'error';
+    btn.disabled         = false;
+    btn.style.background = '#c62828';
+    btn.style.opacity    = '1';
+    chrome.storage.local.set({ status: `Error: ${e.message}`, statusTime: Date.now() });
+    console.error('[Relister v2.3.6]', e);
+    setTimeout(() => {
+      btn.textContent      = 'Relist';
+      btn.dataset.state    = '';
+      btn.style.background = '#1877f2';
+      btn.disabled         = false;
+    }, 4000);
+  }
+}
+
+// ─── Active listing fetch ─────────────────────────────────────────────────────
+
+// doc_id for MarketplaceYouSellingFastActiveSectionPaginationQuery (same as Relistify)
+const LISTINGS_DOC_ID = '6206851639350477';
+
+let _listingPhotoMap = null; // Map<photoFilename, listingId>
+
+function getPhotoFilename(uri) {
+  if (!uri) return null;
+  try { return new URL(uri).pathname.split('/').pop() || null; }
+  catch { return uri.split('/').pop()?.split('?')[0] || null; }
+}
+
+async function fetchListingsPage(cursor) {
+  const t = await getTokens();
+  const body = new URLSearchParams({
+    av: t.user_id,
+    __a: '1',
+    __comet_req: '1',
+    fb_dtsg: t.fb_dtsg,
+    fb_api_caller_class: 'RelayModern',
+    fb_api_req_friendly_name: 'MarketplaceYouSellingFastActiveSectionPaginationQuery',
+    variables: JSON.stringify({
+      count: 24,
+      ...(cursor ? { cursor } : {}),
+      order: 'CREATION_TIMESTAMP_DESC',
+      scale: 2,
+      state: null,
+      status: null,
+      title_search: null
+    }),
+    doc_id: LISTINGS_DOC_ID
+  });
+
+  const res = await fetch('https://www.facebook.com/api/graphql/', {
+    method: 'POST',
+    headers: { accept: '*/*', 'content-type': 'application/x-www-form-urlencoded' },
+    referrer: SELLING_URL,
+    referrerPolicy: 'strict-origin-when-cross-origin',
+    body: body.toString(),
+    mode: 'cors',
+    credentials: 'include'
+  });
+
+  const text = await res.text();
+
+  // FB returns multiple newline-separated JSON objects for this endpoint
+  const objects = text.split('\n')
+    .map(l => l.replace(/^for\s*\(;;\);/, '').trim())
+    .filter(Boolean)
+    .map(l => { try { return JSON.parse(l); } catch { return null; } })
+    .filter(Boolean);
+
+  let listingSets = null;
+  let pageInfo = null;
+  for (const obj of objects) {
+    if (!listingSets) listingSets = deepFind(obj, 'marketplace_listing_sets');
+    if (!pageInfo) {
+      const pi = deepFind(obj, 'page_info');
+      if (pi?.has_next_page !== undefined) pageInfo = pi;
+    }
+  }
+  return { listingSets, pageInfo };
+}
+
+async function buildPhotoMap() {
+  if (_listingPhotoMap) return _listingPhotoMap;
+  const map = new Map();
+  let cursor = null;
+
+  chrome.storage.local.set({ status: 'Loading your listings…', statusTime: Date.now() });
+
+  try {
+    for (let page = 0; page < 20; page++) {
+      const { listingSets, pageInfo } = await fetchListingsPage(cursor);
+      if (!listingSets) break;
+
+      const edges = listingSets.edges ?? [];
+      for (const edge of edges) {
+        const listing = edge?.node?.first_listing;
+        if (!listing?.id) continue;
+        const filename = getPhotoFilename(listing.primary_listing_photo?.image?.uri);
+        if (filename && !map.has(filename)) map.set(filename, String(listing.id));
+      }
+
+      if (!pageInfo?.has_next_page || !pageInfo?.end_cursor || pageInfo.end_cursor === cursor) break;
+      cursor = pageInfo.end_cursor;
+    }
+  } catch (e) {
+    console.warn('[Relister] Listing fetch failed:', e.message);
+    chrome.storage.local.set({ status: `Error: ${e.message}`, statusTime: Date.now() });
+    return null;
+  }
+
+  _listingPhotoMap = map;
+  const msg = map.size > 0 ? `Found ${map.size} listings — scanning page…` : 'API returned 0 listings';
+  chrome.storage.local.set({ status: msg, statusTime: Date.now() });
+  return map;
+}
+
+// ─── UI injection ─────────────────────────────────────────────────────────────
+
+function injectButton(card, listingId) {
+  if (!listingId || !card) return;
+
+  if (card.querySelector('.' + RELIST_CLASS)) return;
+
+  const btn = document.createElement('button');
+  btn.className = RELIST_CLASS;
+  btn.textContent = 'Relist';
+  btn.title = 'Delete & re-post this listing';
+  btn.setAttribute('aria-label', 'Relist this item on Marketplace');
+  btn.style.cssText = [
+    'position:absolute',
+    'bottom:8px',
+    'right:8px',
+    'z-index:9999',
+    'background:#1877f2',
+    'color:#fff',
+    'border:none',
+    'border-radius:6px',
+    'padding:7px 13px',
+    'font-size:12px',
+    'font-weight:700',
+    'cursor:pointer',
+    'box-shadow:0 2px 8px rgba(0,0,0,.45)',
+    'line-height:1.5',
+    'opacity:0.85',
+    'transition:opacity .18s, background .15s'
+  ].join(';');
+
+  // Full opacity on card hover
+  card.addEventListener('mouseenter', () => {
+    if (btn.dataset.state !== 'busy' && btn.dataset.state !== 'done') {
+      btn.style.opacity = '1';
+    }
+  });
+  card.addEventListener('mouseleave', () => {
+    if (!btn.dataset.state && btn.dataset.confirm !== '1') {
+      btn.style.opacity = '0.85';
+    }
+  });
+
+  btn.addEventListener('mouseenter', () => {
+    if (!btn.dataset.state && btn.dataset.confirm !== '1') btn.style.background = '#166fe5';
+  });
+  btn.addEventListener('mouseleave', () => {
+    if (!btn.dataset.state && btn.dataset.confirm !== '1') btn.style.background = '#1877f2';
+  });
+
+  // Two-click confirm pattern: first click → amber "Confirm?", second → execute, auto-cancel after 3s
+  let confirmTimer = null;
+
+  btn.addEventListener('click', e => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    if (btn.dataset.confirm === '1') {
+      clearTimeout(confirmTimer);
+      btn.dataset.confirm  = '';
+      btn.style.background = '#1877f2';
+      relistItem(listingId, btn);
+      return;
+    }
+
+    btn.dataset.confirm  = '1';
+    btn.textContent      = 'Confirm?';
+    btn.style.background = '#d97706';
+    btn.style.opacity    = '1';
+
+    confirmTimer = setTimeout(() => {
+      if (btn.dataset.confirm === '1') {
+        btn.dataset.confirm  = '';
+        btn.textContent      = 'Relist';
+        btn.style.background = '#1877f2';
+        btn.style.opacity    = '0.85';
+      }
+    }, 3000);
+  });
+
+  if (getComputedStyle(card).position === 'static') card.style.position = 'relative';
+  card.appendChild(btn);
+}
+
+// Scan page for listing cards by matching img src against known photo filenames
+function scanListings() {
+  if (!_listingPhotoMap || _listingPhotoMap.size === 0) return;
+
+  const remaining = new Map(_listingPhotoMap);
+
+  for (const img of document.getElementsByTagName('img')) {
+    if (remaining.size === 0) break;
+    let matchId = null;
+    for (const [filename, listingId] of remaining) {
+      if (img.src.includes(filename)) {
+        matchId = listingId;
+        remaining.delete(filename);
+        break;
+      }
+    }
+    if (!matchId) continue;
+    const card = img.closest('[aria-label][role="button"]')?.parentElement;
+    if (card) injectButton(card, matchId);
+  }
+}
+
+// ─── Init ─────────────────────────────────────────────────────────────────────
+
+let _debounceTimer = null;
+const _observer = new MutationObserver(() => {
+  clearTimeout(_debounceTimer);
+  _debounceTimer = setTimeout(scanListings, 250);
+});
+_observer.observe(document.body, { childList: true, subtree: true });
+
+async function init() {
+  try {
+    await buildPhotoMap();
+    // Retry scan every 1s for 5s — React may not have rendered cards yet
+    for (let i = 0; i < 5; i++) {
+      scanListings();
+      await new Promise(r => setTimeout(r, 1000));
+    }
+  } catch (e) {
+    console.warn('[Relister] Init failed:', e.message);
+  }
+}
+
+init();

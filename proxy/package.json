@@ -1,0 +1,12 @@
+{
+  "name": "fbr-ai-proxy",
+  "version": "1.0.0",
+  "description": "AI proxy for Relist for Facebook Marketplace — Gemini Flash-Lite backend",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

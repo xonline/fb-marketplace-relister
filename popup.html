@@ -3,117 +3,503 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>FB Marketplace Relister</title>
+  <title>Relister</title>
   <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
+    /* ── Design: Light · high-contrast · blue primary ── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:      #F8FAFC;
+      --surface: #FFFFFF;
+      --border:  #E2E8F0;
+      --text:    #0F172A;
+      --muted:   #64748B;
+      --dim:     #475569;
+      --green:   #16A34A;
+      --amber:   #D97706;
+      --red:     #DC2626;
+      --blue:    #1877F2;
+      --blue-lt: #EFF6FF;
+      --r:       10px;
+    }
 
     body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-      background: #1c1e21;
-      color: #e4e6ea;
-      width: 300px;
-      padding: 16px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      width: 320px;
+      -webkit-font-smoothing: antialiased;
     }
 
-    h1 {
-      font-size: 15px;
-      font-weight: 700;
-      color: #1877f2;
-      margin-bottom: 4px;
+    /* ── Header ── */
+    .header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 14px 14px 12px;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
     }
 
-    .version {
-      font-size: 11px;
-      color: #b0b3b8;
-      margin-bottom: 14px;
-    }
-
-    .card {
-      background: #242526;
+    .logo {
+      width: 32px; height: 32px;
+      background: var(--blue);
       border-radius: 8px;
-      padding: 12px;
-      margin-bottom: 10px;
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0;
+      box-shadow: 0 2px 6px rgba(24,119,242,.25);
     }
 
-    .label {
-      font-size: 11px;
-      text-transform: uppercase;
-      letter-spacing: 0.8px;
-      color: #b0b3b8;
-      margin-bottom: 6px;
+    .header-copy { flex: 1; min-width: 0; }
+    .header-copy h1 { font-size: 13px; font-weight: 700; line-height: 1.2; color: var(--text); }
+    .header-copy .ver { font-size: 10px; color: var(--muted); margin-top: 1px; }
+
+    /* status pill — coloured background tint for instant scanability */
+    /* Uses :has() on dot child class — popup.js only sets dot.className, not pill's */
+    .pill {
+      display: flex; align-items: center; gap: 5px;
+      background: #F1F5F9;
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 4px 8px 4px 6px;
+      flex-shrink: 0;
+      transition: background .25s, border-color .25s;
+    }
+    .pill:has(.dot.ready),
+    .pill:has(.dot.success)  { background: #DCFCE7; border-color: #BBF7D0; }
+    .pill:has(.dot.busy)     { background: #FEF3C7; border-color: #FDE68A; }
+    .pill:has(.dot.error)    { background: #FEE2E2; border-color: #FECACA; }
+
+    .dot {
+      width: 6px; height: 6px; border-radius: 50%;
+      background: #CBD5E1;
+      transition: background .3s;
+    }
+    .dot.ready    { background: var(--green); }
+    .dot.success  { background: var(--green); }
+    .dot.busy     { background: var(--amber); animation: blink 1.2s ease-in-out infinite; }
+    .dot.error    { background: var(--red); }
+
+    .pill-label {
+      font-size: 10px; font-weight: 700; letter-spacing: .04em;
+      color: var(--muted);
+      transition: color .25s;
+    }
+    .pill:has(.dot.ready)   .pill-label,
+    .pill:has(.dot.success) .pill-label { color: #15803D; }
+    .pill:has(.dot.busy)    .pill-label { color: #B45309; }
+    .pill:has(.dot.error)   .pill-label { color: #B91C1C; }
+
+    @keyframes blink { 0%,100%{opacity:1} 50%{opacity:.35} }
+
+    /* ── Body ── */
+    .body { padding: 10px 10px 0; display: flex; flex-direction: column; gap: 8px; }
+
+    /* ── Card ── */
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--r);
+      overflow: hidden;
+      box-shadow: 0 1px 3px rgba(15,23,42,.06);
+    }
+    .card-label {
+      padding: 9px 12px 0;
+      font-size: 10px; font-weight: 700;
+      text-transform: uppercase; letter-spacing: .07em;
+      color: var(--muted);
     }
 
-    .status-text {
-      font-size: 13px;
-      color: #e4e6ea;
-      word-break: break-word;
-      min-height: 18px;
+    /* ── Page state ── */
+    .page-row {
+      display: flex; align-items: center; gap: 10px;
+      padding: 8px 12px 12px;
     }
-
-    .hint {
-      font-size: 12px;
-      color: #b0b3b8;
-      line-height: 1.5;
+    .page-icon {
+      width: 30px; height: 30px; border-radius: 7px;
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0; transition: background .3s;
     }
+    .page-icon.on  { background: #DCFCE7; }
+    .page-icon.off { background: #F1F5F9; }
+    .page-copy .title { font-size: 13px; font-weight: 600; color: var(--text); line-height: 1.3; }
+    .page-copy .hint  { font-size: 11px; color: var(--muted); margin-top: 2px; line-height: 1.4; }
 
-    .hint strong { color: #e4e6ea; }
-
-    a.open-link {
-      display: block;
-      text-align: center;
-      font-size: 13px;
-      font-weight: 600;
-      color: #fff;
-      background: #1877f2;
-      text-decoration: none;
-      border-radius: 6px;
-      padding: 9px;
-      margin-bottom: 8px;
-      transition: opacity 0.15s;
+    /* CTA */
+    .cta-wrap { padding: 0 12px 12px; }
+    .btn-primary {
+      display: flex; align-items: center; justify-content: center; gap: 6px;
+      width: 100%; padding: 10px 14px;
+      background: var(--blue); color: #FFFFFF;
+      border: none; border-radius: 8px;
+      font-size: 13px; font-weight: 700; cursor: pointer;
+      text-decoration: none; letter-spacing: .01em;
+      transition: background .15s, transform .1s;
+      box-shadow: 0 1px 3px rgba(24,119,242,.3);
     }
-    a.open-link:hover { opacity: 0.88; }
+    .btn-primary:hover  { background: #1668D6; }
+    .btn-primary:active { transform: scale(.98); }
 
-    button {
-      width: 100%;
-      padding: 9px;
+    /* ── Operation status ── */
+    .op-body { padding: 8px 12px 12px; }
+    .op-row  { display: flex; align-items: flex-start; gap: 8px; }
+    .op-icon {
+      width: 26px; height: 26px; border-radius: 6px;
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0; margin-top: 1px; transition: background .3s;
+    }
+    .op-icon.idle    { background: #F1F5F9; }
+    .op-icon.success { background: #DCFCE7; }
+    .op-icon.busy    { background: #FEF3C7; }
+    .op-icon.error   { background: #FEE2E2; }
+    .op-text .msg { font-size: 12px; color: var(--dim); line-height: 1.45; word-break: break-word; }
+    .op-text .msg.success { color: var(--green); font-weight: 600; }
+    .op-text .msg.busy    { color: var(--amber); font-weight: 600; }
+    .op-text .msg.error   { color: var(--red);   font-weight: 600; }
+    .op-text .time { font-size: 10px; color: var(--muted); margin-top: 3px; }
+
+    /* progress steps */
+    .steps-wrap { margin-top: 9px; }
+    .steps-bar-bg {
+      height: 3px; background: #E2E8F0;
+      border-radius: 2px; overflow: hidden;
+    }
+    .steps-bar-fill {
+      height: 100%; background: var(--blue);
+      border-radius: 2px; transition: width .4s ease;
+    }
+    .steps-row {
+      display: flex; gap: 3px; margin-top: 6px;
+      font-size: 10px; color: #CBD5E1;
+    }
+    .step { transition: color .3s; }
+    .step.done    { color: var(--green); font-weight: 600; }
+    .step.current { color: var(--blue);  font-weight: 600; }
+    .sep { color: #CBD5E1; }
+
+    /* ── Footer ── */
+    .footer {
+      padding: 10px 10px 12px;
+      display: flex; align-items: center; justify-content: space-between;
+      background: var(--surface);
+      border-top: 1px solid var(--border);
+    }
+    .btn-ghost {
+      padding: 6px 11px;
+      background: transparent; border: 1px solid var(--border);
+      border-radius: 6px; font-size: 11px; font-weight: 500;
+      color: var(--muted); cursor: pointer;
+      transition: border-color .15s, color .15s, background .15s;
+    }
+    .btn-ghost:hover { border-color: #CBD5E1; background: #F8FAFC; color: var(--dim); }
+    .btn-ghost.done  { border-color: var(--green); color: var(--green); }
+    .cache-info { font-size: 10px; color: var(--muted); text-align: right; line-height: 1.5; }
+    .cached   { color: var(--green); font-weight: 600; }
+    .uncached { color: var(--muted); }
+    .steps-bar-fill.success { background: var(--green); }
+    .new-listing-link { display:block; margin-top:5px; font-size:11px; color:var(--blue); text-decoration:none; font-weight:500; }
+    .new-listing-link:hover { text-decoration:underline; }
+    .stats-bar { margin-top:6px; padding:5px 0 0; font-size:10px; color:var(--muted); border-top:1px solid var(--border); }
+
+    /* ── Plan status card ── */
+    .plan-row {
+      display: flex; align-items: center; gap: 10px;
+      padding: 9px 12px 10px;
+    }
+    .plan-badge {
+      font-size: 9px; font-weight: 800; letter-spacing: .06em;
+      text-transform: uppercase; padding: 2px 6px;
+      border-radius: 4px; flex-shrink: 0;
+    }
+    .plan-badge.free { background: #F1F5F9; color: var(--dim); border: 1px solid var(--border); }
+    .plan-badge.pro  { background: #FEF3C7; color: #B45309; border: 1px solid #FDE68A; }
+    .plan-info { flex: 1; min-width: 0; }
+    .plan-info .plan-label { font-size: 12px; font-weight: 600; color: var(--text); }
+    .plan-info .plan-sub   { font-size: 10px; color: var(--muted); margin-top: 1px; }
+    .plan-limit-bar-bg {
+      height: 3px; background: #E2E8F0; border-radius: 2px; overflow: hidden;
+      margin-top: 5px;
+    }
+    .plan-limit-bar-fill {
+      height: 100%; background: var(--blue); border-radius: 2px;
+      transition: width .3s ease;
+    }
+    .plan-limit-bar-fill.warn { background: var(--amber); }
+    .plan-limit-bar-fill.full { background: var(--red); }
+    .btn-upgrade {
+      display: flex; align-items: center; justify-content: center; gap: 5px;
+      width: calc(100% - 24px); margin: 0 12px 10px;
+      padding: 8px 12px;
+      background: linear-gradient(135deg, #F59E0B, #EF4444);
+      color: #fff; border: none; border-radius: 7px;
+      font-size: 12px; font-weight: 700; cursor: pointer;
+      letter-spacing: .01em; transition: opacity .15s, transform .1s;
+      box-shadow: 0 1px 4px rgba(239,68,68,.3);
+    }
+    .btn-upgrade:hover  { opacity: .92; }
+    .btn-upgrade:active { transform: scale(.98); }
+
+    /* ── Bulk actions bar ── */
+    .bulk-bar {
+      padding: 8px 10px;
+      display: flex;
+      gap: 6px;
+      background: var(--surface);
+      border-top: 1px solid var(--border);
+    }
+    .btn-bulk {
+      flex: 1;
+      display: flex; align-items: center; justify-content: center; gap: 5px;
+      padding: 9px 10px;
+      background: var(--blue);
       border: none;
-      border-radius: 6px;
-      font-size: 13px;
-      font-weight: 600;
-      cursor: pointer;
-      transition: opacity 0.15s;
+      border-radius: 8px;
+      font-size: 12px; font-weight: 700;
+      color: #FFFFFF; cursor: pointer;
+      transition: background .15s, opacity .15s;
+      box-shadow: 0 1px 3px rgba(24,119,242,.25);
     }
-    button:hover { opacity: 0.88; }
-
-    #btn-clear-cache {
-      background: #3a3b3c;
-      color: #b0b3b8;
+    .btn-bulk:hover  { background: #1668D6; }
+    .btn-bulk:active { opacity: .85; }
+    .btn-bulk:disabled { opacity: .45; cursor: not-allowed; background: var(--blue); }
+    .btn-options {
+      display: flex; align-items: center; justify-content: center;
+      padding: 9px 11px;
+      background: transparent;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      font-size: 12px; font-weight: 500;
+      color: var(--dim); cursor: pointer;
+      transition: border-color .15s, color .15s, background .15s;
+      white-space: nowrap;
     }
+    .btn-options:hover { border-color: #CBD5E1; background: #F8FAFC; color: var(--text); }
 
-    #btn-clear-cache.done {
-      color: #2e7d32;
+    /* ── Auto-Relist card ── */
+    .ar-card { padding: 9px 12px 12px; }
+    .ar-field-row {
+      display: flex; align-items: center; gap: 8px;
+      margin-top: 7px;
+    }
+    .ar-field-row label { font-size: 11px; color: var(--muted); min-width: 72px; }
+    .ar-field-row select,
+    .ar-field-row input[type="datetime-local"],
+    .ar-field-row input[type="time"],
+    .ar-field-row input[type="number"] {
+      flex: 1; padding: 5px 7px;
+      border: 1px solid var(--border); border-radius: 6px;
+      font-size: 11px; color: var(--text); background: var(--bg);
+    }
+    .ar-field-row select:disabled,
+    .ar-field-row input:disabled {
+      opacity: .45; cursor: not-allowed;
+    }
+    .ar-toggle-row {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-top: 7px;
+    }
+    .ar-toggle-row label { font-size: 11px; color: var(--muted); }
+    .ar-toggle-row input[type="checkbox"] { accent-color: var(--blue); }
+    .btn-sm {
+      margin-top: 9px; width: 100%;
+      padding: 7px 10px;
+      background: var(--blue); color: #fff;
+      border: none; border-radius: 6px;
+      font-size: 11px; font-weight: 700; cursor: pointer;
+      transition: background .15s;
+    }
+    .btn-sm:hover { background: #1668D6; }
+    .pro-pill-inline {
+      font-size: 9px; font-weight: 800; letter-spacing: .05em;
+      text-transform: uppercase; padding: 1px 5px;
+      border-radius: 3px; margin-left: 5px;
+      background: #FEF3C7; color: #B45309; border: 1px solid #FDE68A;
+      vertical-align: middle;
+    }
+    .upgrade-sub {
+      display: block; font-size: 10px; font-weight: 400;
+      opacity: .85; margin-top: 1px;
     }
   </style>
 </head>
 <body>
-  <h1>FB Marketplace Relister</h1>
-  <div class="version">v2.1.0 — Direct API mode</div>
 
-  <div class="card">
-    <div class="label">Last Status</div>
-    <div class="status-text" id="status-text">Ready</div>
-  </div>
-
-  <div class="card">
-    <div class="hint">
-      <strong>Relist</strong> buttons appear on each listing card on your selling page.
-      Click one to delete &amp; re-post that item instantly via Facebook's API.
+  <!-- Header -->
+  <div class="header">
+    <div class="logo">
+      <svg width="16" height="16" viewBox="0 0 20 20" fill="none">
+        <path d="M3.5 10a6.5 6.5 0 0 1 11.18-4.5H12a.75.75 0 0 0 0 1.5h3.75c.414 0 .75-.336.75-.75V2.5a.75.75 0 0 0-1.5 0v1.94A8 8 0 1 0 18 10a.75.75 0 0 0-1.5 0A6.5 6.5 0 0 1 3.5 10z" fill="white"/>
+      </svg>
+    </div>
+    <div class="header-copy">
+      <h1>Marketplace Relister</h1>
+      <div class="ver">v3.7.3 · API+AI+Condition</div>
+    </div>
+    <div class="pill">
+      <div class="dot" id="dot"></div>
+      <span class="pill-label" id="pill-label">IDLE</span>
     </div>
   </div>
 
-  <a id="link-open-listings" class="open-link" href="#">Open My Listings Page</a>
+  <!-- Body -->
+  <div class="body">
 
-  <button id="btn-clear-cache">Clear Token Cache</button>
+    <!-- Page detection -->
+    <div class="card">
+      <div class="card-label">Current Page</div>
+      <div class="page-row">
+        <div class="page-icon off" id="page-icon">
+          <svg id="page-icon-svg" width="15" height="15" viewBox="0 0 20 20" fill="none">
+            <circle cx="10" cy="10" r="8" stroke="#64748B" stroke-width="1.5"/>
+          </svg>
+        </div>
+        <div class="page-copy">
+          <div class="title" id="page-title">Detecting…</div>
+          <div class="hint"  id="page-hint"></div>
+        </div>
+      </div>
+      <div id="cta-wrap" style="display:none" class="cta-wrap">
+        <a id="cta-btn" class="btn-primary" href="#">
+          <svg width="13" height="13" viewBox="0 0 20 20" fill="none">
+            <path d="M10 2a8 8 0 1 0 0 16A8 8 0 0 0 10 2zm3.28 8.53-3 3a.75.75 0 0 1-1.06-1.06L11.44 10l-2.22-2.47a.75.75 0 0 1 1.06-1.06l3 3c.14.14.22.33.22.53s-.08.38-.22.53z" fill="currentColor"/>
+          </svg>
+          Open My Listings
+        </a>
+      </div>
+    </div>
+
+    <!-- Last operation -->
+    <div class="card">
+      <div class="card-label">Last Operation</div>
+      <div class="op-body">
+        <div class="op-row">
+          <div class="op-icon idle" id="op-icon">
+            <svg id="op-icon-svg" width="13" height="13" viewBox="0 0 20 20" fill="none">
+              <circle cx="10" cy="10" r="7" stroke="#64748B" stroke-width="1.5"/>
+            </svg>
+          </div>
+          <div class="op-text">
+            <div class="msg idle" id="op-msg" aria-live="polite">No activity yet</div>
+            <div class="time" id="op-time"></div>
+            <a id="new-listing-link" class="new-listing-link" href="#" target="_blank" style="display:none">↗ View new listing</a>
+          </div>
+        </div>
+        <div id="stats-bar" class="stats-bar" style="display:none"></div>
+        <div class="steps-wrap" id="steps-wrap" style="display:none">
+          <div class="steps-bar-bg">
+            <div class="steps-bar-fill" id="steps-bar" style="width:0%"></div>
+          </div>
+          <div class="steps-row">
+            <span class="step" id="s0">Load</span>
+            <span class="sep">›</span>
+            <span class="step" id="s1">Read</span>
+            <span class="sep">›</span>
+            <span class="step" id="s2">Post</span>
+            <span class="sep">›</span>
+            <span class="step" id="s3">Delete</span>
+            <span class="sep">›</span>
+            <span class="step" id="s4">Done</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Plan status -->
+    <div class="card" id="plan-card">
+      <div class="card-label">Plan</div>
+      <div class="plan-row">
+        <span class="plan-badge free" id="plan-badge">FREE</span>
+        <div class="plan-info">
+          <div class="plan-label" id="plan-label">Loading…</div>
+          <div class="plan-sub"  id="plan-sub"></div>
+          <div class="plan-limit-bar-bg" id="plan-bar-bg" style="display:none">
+            <div class="plan-limit-bar-fill" id="plan-bar-fill" style="width:0%"></div>
+          </div>
+        </div>
+      </div>
+      <button class="btn-upgrade" id="btn-upgrade" style="display:none">
+        <svg width="11" height="11" viewBox="0 0 20 20" fill="none">
+          <path d="M10 2l2.4 5 5.6.8-4 4 .9 5.6L10 15l-4.9 2.4.9-5.6-4-4 5.6-.8z" fill="currentColor"/>
+        </svg>
+        <span>Special: <s>$6.99</s> $3.95/mo</span>
+        <span class="upgrade-sub">or $39/yr · full functionality, limited time</span>
+      </button>
+    </div>
+
+    <!-- Auto-Relist schedule -->
+    <div class="card" id="ar-card">
+      <div class="card-label">Auto-Relist<span class="pro-pill-inline" id="ar-pro-badge" style="display:none">PRO</span></div>
+      <div class="ar-card">
+        <div class="ar-field-row">
+          <label for="ar-mode">Schedule</label>
+          <select id="ar-mode">
+            <option value="interval">Every N hours</option>
+            <option value="onetime">One-off date &amp; time</option>
+            <option value="daily">Daily at time</option>
+            <option value="weekly">Weekly on day</option>
+          </select>
+        </div>
+        <!-- one-off datetime -->
+        <div class="ar-field-row" id="ar-dt-wrap" style="display:none">
+          <label for="ar-datetime">Date &amp; time</label>
+          <input type="datetime-local" id="ar-datetime" />
+        </div>
+        <!-- daily time -->
+        <div class="ar-field-row" id="ar-t-wrap" style="display:none">
+          <label for="ar-time">Time</label>
+          <input type="time" id="ar-time" />
+        </div>
+        <!-- weekly weekday -->
+        <div class="ar-field-row" id="ar-wd-wrap" style="display:none">
+          <label for="ar-weekday">Day</label>
+          <select id="ar-weekday">
+            <option value="0">Sunday</option>
+            <option value="1">Monday</option>
+            <option value="2">Tuesday</option>
+            <option value="3">Wednesday</option>
+            <option value="4">Thursday</option>
+            <option value="5">Friday</option>
+            <option value="6">Saturday</option>
+          </select>
+        </div>
+        <!-- interval hours -->
+        <div class="ar-field-row" id="ar-h-wrap">
+          <label for="ar-hours">Every (hrs)</label>
+          <input type="number" id="ar-hours" min="1" max="168" value="24" />
+        </div>
+        <div class="ar-toggle-row">
+          <label for="ar-ai-toggle">AI enhance on relist</label>
+          <input type="checkbox" id="ar-ai-toggle" />
+        </div>
+        <div class="ar-toggle-row">
+          <label for="ar-enabled"><strong>Enabled</strong></label>
+          <input type="checkbox" id="ar-enabled" />
+        </div>
+        <button class="btn-sm" id="btn-ar-save">Save schedule</button>
+      </div>
+    </div>
+
+  </div><!-- /.body -->
+
+  <!-- Bulk actions bar -->
+  <div class="bulk-bar">
+    <button class="btn-bulk" id="btn-relist-all">
+      <svg width="12" height="12" viewBox="0 0 20 20" fill="none">
+        <path d="M3.5 10a6.5 6.5 0 0 1 11.18-4.5H12a.75.75 0 0 0 0 1.5h3.75c.414 0 .75-.336.75-.75V2.5a.75.75 0 0 0-1.5 0v1.94A8 8 0 1 0 18 10a.75.75 0 0 0-1.5 0A6.5 6.5 0 0 1 3.5 10z" fill="currentColor"/>
+      </svg>
+      Relist all live
+    </button>
+    <button class="btn-options" id="btn-options">&#9881; Options</button>
+  </div>
+
+  <!-- Footer -->
+  <div class="footer">
+    <button class="btn-ghost" id="btn-clear">Clear Cache</button>
+    <div class="cache-info" id="cache-info"></div>
+  </div>
+  <div style="text-align:center;padding:4px 10px 8px;background:var(--bg);">
+    <a id="btn-feedback" href="#" style="font-size:10px;color:var(--muted);text-decoration:none;">💬 Request a feature / Send feedback</a>
+  </div>
 
   <script src="popup.js"></script>
 </body>

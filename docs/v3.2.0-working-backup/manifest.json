@@ -1,0 +1,32 @@
+{
+  "manifest_version": 3,
+  "name": "FB Marketplace Relister",
+  "version": "3.2.0",
+  "description": "Relists Facebook Marketplace items via direct GraphQL API — photos re-uploaded, minimal payload, no UI automation.",
+  "permissions": [
+    "storage",
+    "tabs",
+    "scripting",
+    "activeTab"
+  ],
+  "host_permissions": [
+    "*://*.facebook.com/*",
+    "https://upload.facebook.com/*",
+    "https://*.fbcdn.net/*",
+    "https://*.xx.fbcdn.net/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["*://www.facebook.com/marketplace/you/selling*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "FB Marketplace Relister"
+  }
+}

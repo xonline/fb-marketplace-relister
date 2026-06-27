@@ -1,0 +1,513 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Relister Settings</title>
+  <style>
+    /* ── Design: OLED dark · system font · green accent (matches popup.html) ── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:      #0A0F1E;
+      --surface: #111827;
+      --border:  #1F2D45;
+      --text:    #F1F5F9;
+      --muted:   #64748B;
+      --dim:     #94A3B8;
+      --green:   #22C55E;
+      --amber:   #F59E0B;
+      --red:     #EF4444;
+      --blue:    #1877F2;
+      --r:       10px;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      padding: 24px 0 48px;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    .page {
+      max-width: 560px;
+      margin: 0 auto;
+      padding: 0 16px;
+    }
+
+    /* ── Header ── */
+    .header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 28px;
+    }
+    .logo {
+      width: 36px; height: 36px;
+      background: var(--blue);
+      border-radius: 9px;
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0;
+      box-shadow: 0 2px 10px rgba(24,119,242,.35);
+    }
+    .header-copy h1 {
+      font-size: 16px; font-weight: 700; line-height: 1.2;
+    }
+    .header-copy .ver {
+      font-size: 11px; color: var(--muted); margin-top: 2px;
+    }
+
+    /* ── Section ── */
+    .section {
+      margin-bottom: 20px;
+    }
+    .section-title {
+      font-size: 10px; font-weight: 700;
+      text-transform: uppercase; letter-spacing: .08em;
+      color: var(--muted);
+      margin-bottom: 8px;
+      padding-left: 2px;
+    }
+
+    /* ── Card ── */
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--r);
+      overflow: hidden;
+    }
+
+    /* ── Field row ── */
+    .field {
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--border);
+    }
+    .field:last-child { border-bottom: none; }
+
+    .field-label {
+      font-size: 12px; font-weight: 600;
+      color: var(--dim);
+      margin-bottom: 6px;
+      display: flex; align-items: center; gap: 6px;
+    }
+    .field-label .badge {
+      font-size: 9px; font-weight: 700;
+      text-transform: uppercase; letter-spacing: .05em;
+      background: rgba(24,119,242,.15);
+      color: var(--blue);
+      padding: 1px 5px;
+      border-radius: 3px;
+    }
+    .field-hint {
+      font-size: 11px; color: var(--muted);
+      margin-top: 4px; line-height: 1.5;
+    }
+
+    /* ── Inputs ── */
+    input[type="text"],
+    input[type="password"],
+    input[type="number"],
+    select,
+    textarea {
+      width: 100%;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      color: var(--text);
+      font-family: inherit;
+      font-size: 13px;
+      padding: 8px 10px;
+      outline: none;
+      transition: border-color .15s;
+    }
+    input[type="text"]:focus,
+    input[type="password"]:focus,
+    input[type="number"]:focus,
+    select:focus,
+    textarea:focus {
+      border-color: var(--blue);
+    }
+
+    textarea {
+      resize: vertical;
+      min-height: 140px;
+      line-height: 1.55;
+    }
+
+    select {
+      appearance: none;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%2364748B' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 10px center;
+      padding-right: 30px;
+    }
+
+    /* ── Checkbox row ── */
+    .checkbox-row {
+      display: flex; align-items: center; gap: 10px;
+    }
+    .checkbox-row input[type="checkbox"] {
+      width: 16px; height: 16px;
+      accent-color: var(--green);
+      cursor: pointer;
+      flex-shrink: 0;
+    }
+    .checkbox-row label {
+      font-size: 13px; color: var(--text);
+      cursor: pointer; line-height: 1.4;
+      user-select: none;
+    }
+
+    /* ── Inline row (label + short input side by side) ── */
+    .inline-row {
+      display: flex; align-items: center; gap: 10px;
+    }
+    .inline-row input[type="number"],
+    .inline-row select {
+      flex: 1;
+    }
+    .inline-row .unit {
+      font-size: 12px; color: var(--muted);
+      white-space: nowrap;
+    }
+
+    /* ── Buttons ── */
+    .actions {
+      display: flex; align-items: center; gap: 10px;
+      margin-top: 20px;
+    }
+
+    .btn-primary {
+      display: flex; align-items: center; justify-content: center; gap: 6px;
+      padding: 10px 20px;
+      background: var(--green); color: #051010;
+      border: none; border-radius: 8px;
+      font-size: 13px; font-weight: 700; cursor: pointer;
+      letter-spacing: .01em;
+      transition: opacity .15s, transform .1s;
+      white-space: nowrap;
+    }
+    .btn-primary:hover  { opacity: .88; }
+    .btn-primary:active { transform: scale(.98); }
+
+    .btn-secondary {
+      display: flex; align-items: center; justify-content: center; gap: 6px;
+      padding: 10px 16px;
+      background: transparent;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      font-size: 13px; font-weight: 500; cursor: pointer;
+      color: var(--dim);
+      letter-spacing: .01em;
+      transition: border-color .15s, color .15s;
+      white-space: nowrap;
+    }
+    .btn-secondary:hover { border-color: #2D4060; color: var(--text); }
+    .btn-secondary:active { transform: scale(.98); }
+
+    /* ── Plan banner ── */
+    .plan-banner {
+      display: flex; align-items: center; gap: 12px;
+      padding: 12px 14px;
+    }
+    .plan-badge-opt {
+      font-size: 10px; font-weight: 800;
+      text-transform: uppercase; letter-spacing: .08em;
+      padding: 3px 8px; border-radius: 5px;
+      flex-shrink: 0;
+    }
+    .plan-badge-opt.free {
+      background: rgba(100,116,139,.15);
+      color: #94A3B8;
+      border: 1px solid rgba(100,116,139,.25);
+    }
+    .plan-badge-opt.pro {
+      background: rgba(34,197,94,.12);
+      color: var(--green);
+      border: 1px solid rgba(34,197,94,.25);
+    }
+    .plan-banner-text { flex: 1; font-size: 13px; color: var(--dim); }
+    .plan-banner-text strong { color: var(--text); }
+    .btn-upgrade-opt {
+      display: flex; align-items: center; gap: 5px;
+      padding: 7px 12px;
+      background: rgba(34,197,94,.1);
+      border: 1px solid rgba(34,197,94,.3);
+      border-radius: 7px;
+      font-size: 12px; font-weight: 600; cursor: pointer;
+      color: var(--green);
+      transition: background .15s;
+      white-space: nowrap;
+    }
+    .btn-upgrade-opt:hover { background: rgba(34,197,94,.18); }
+
+    /* ── Disabled Pro fields ── */
+    .pro-lock .field-label::after {
+      content: ' · Pro';
+      font-size: 9px; font-weight: 700;
+      text-transform: uppercase; letter-spacing: .05em;
+      color: var(--amber);
+      margin-left: 4px;
+    }
+    .pro-lock input,
+    .pro-lock select,
+    .pro-lock textarea,
+    .pro-lock .checkbox-row input {
+      opacity: .45;
+      cursor: not-allowed;
+      pointer-events: none;
+    }
+
+    /* ── Advanced expander ── */
+    #advanced-ai-section {
+      border-top: 1px solid var(--border);
+    }
+    .advanced-summary {
+      padding: 10px 14px;
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--muted);
+      list-style: none;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      user-select: none;
+      outline: none;
+    }
+    .advanced-summary::-webkit-details-marker { display: none; }
+    .advanced-summary:hover { color: var(--dim); }
+    .adv-chevron {
+      transition: transform .2s;
+      flex-shrink: 0;
+    }
+    #advanced-ai-section[open] .adv-chevron {
+      transform: rotate(180deg);
+    }
+    .advanced-body {
+      border-top: 1px solid var(--border);
+    }
+
+    /* ── Status message ── */
+    #status-msg {
+      font-size: 12px;
+      font-weight: 600;
+      padding: 8px 12px;
+      border-radius: 7px;
+      display: none;
+      line-height: 1.4;
+      flex: 1;
+    }
+    #status-msg.success {
+      display: block;
+      background: rgba(34,197,94,.1);
+      border: 1px solid rgba(34,197,94,.25);
+      color: var(--green);
+    }
+    #status-msg.error {
+      display: block;
+      background: rgba(239,68,68,.1);
+      border: 1px solid rgba(239,68,68,.25);
+      color: var(--red);
+    }
+    #status-msg.loading {
+      display: block;
+      background: rgba(245,158,11,.08);
+      border: 1px solid rgba(245,158,11,.2);
+      color: var(--amber);
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+
+    <!-- Header -->
+    <div class="header">
+      <div class="logo">
+        <svg width="18" height="18" viewBox="0 0 20 20" fill="none">
+          <path d="M3.5 10a6.5 6.5 0 0 1 11.18-4.5H12a.75.75 0 0 0 0 1.5h3.75c.414 0 .75-.336.75-.75V2.5a.75.75 0 0 0-1.5 0v1.94A8 8 0 1 0 18 10a.75.75 0 0 0-1.5 0A6.5 6.5 0 0 1 3.5 10z" fill="white"/>
+        </svg>
+      </div>
+      <div class="header-copy">
+        <h1>Relister Settings</h1>
+        <div class="ver">v3.7.4 · FB Marketplace Relister</div>
+      </div>
+    </div>
+
+    <!-- Plan Status -->
+    <div class="section">
+      <div class="section-title">Plan</div>
+      <div class="card">
+        <div class="plan-banner">
+          <span class="plan-badge-opt free" id="opt-plan-badge">FREE</span>
+          <div class="plan-banner-text">
+            <strong id="opt-plan-label">Loading…</strong>
+            <div id="opt-plan-sub" style="font-size:11px;color:var(--muted);margin-top:2px"></div>
+          </div>
+          <button class="btn-upgrade-opt" id="opt-btn-upgrade" style="display:none">
+            <svg width="11" height="11" viewBox="0 0 20 20" fill="none">
+              <path d="M10 2l2.4 5 5.6.8-4 4 .9 5.6L10 15l-4.9 2.4.9-5.6-4-4 5.6-.8z" fill="currentColor"/>
+            </svg>
+            <span>Special: <s>$6.99</s> $3.95/mo · or $39/yr</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- AI Section -->
+    <div class="section" id="section-ai">
+      <div class="section-title">AI <span style="font-size:9px;color:var(--amber);font-weight:700;text-transform:uppercase;letter-spacing:.06em;margin-left:4px">Pro</span></div>
+      <div class="card">
+
+        <div class="field">
+          <div class="checkbox-row">
+            <input type="checkbox" id="aiEnhanceOnRelist" />
+            <label for="aiEnhanceOnRelist">Enhance description with AI on every relist</label>
+          </div>
+          <div class="field-hint" style="margin-top:8px">Uses provided AI — no API key required for Pro members.</div>
+        </div>
+
+        <div class="field">
+          <div class="field-label">System Prompt</div>
+          <textarea id="aiSystemPrompt" placeholder="Describe the AI persona and instructions…"></textarea>
+          <div class="field-hint">Defines the AI copywriter persona. Editing this customises all generated listings.</div>
+        </div>
+
+        <!-- Advanced: BYO key override (collapsed by default) -->
+        <details id="advanced-ai-section">
+          <summary class="advanced-summary">
+            <svg class="adv-chevron" width="10" height="10" viewBox="0 0 10 10" fill="none">
+              <path d="M2 3.5l3 3 3-3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            Advanced — BYO Gemini Key
+          </summary>
+          <div class="advanced-body">
+            <div class="field">
+              <div class="field-label">
+                Gemini API Key
+                <span class="badge">Optional override</span>
+              </div>
+              <input type="password" id="geminiApiKey" placeholder="AIza…" autocomplete="off" />
+              <div class="field-hint">Overrides the provided AI. Leave blank to use built-in AI. Get a key at <a href="https://aistudio.google.com/app/apikey" target="_blank" style="color:var(--blue)">aistudio.google.com</a></div>
+            </div>
+            <div class="field">
+              <div class="field-label">Gemini Model</div>
+              <input type="text" id="geminiModel" placeholder="gemini-2.5-flash" />
+              <div class="field-hint">Default: <code style="color:var(--dim)">gemini-2.5-flash</code></div>
+            </div>
+            <div class="field" style="border-bottom:none">
+              <button class="btn-secondary" id="btn-test-ai" style="width:100%">
+                <svg width="13" height="13" viewBox="0 0 20 20" fill="none">
+                  <path d="M10 2a8 8 0 1 0 0 16A8 8 0 0 0 10 2zm3.28 5.97-4 5a.75.75 0 0 1-1.18-.06l-1.5-2a.75.75 0 1 1 1.2-.9l.93 1.24 3.43-4.29a.75.75 0 1 1 1.12 1z" fill="currentColor"/>
+                </svg>
+                Test BYO API Key
+              </button>
+            </div>
+          </div>
+        </details>
+
+      </div>
+    </div>
+
+    <!-- Price Drop Section -->
+    <div class="section" id="section-pricedrop">
+      <div class="section-title">Price Drop <span style="font-size:9px;color:var(--amber);font-weight:700;text-transform:uppercase;letter-spacing:.06em;margin-left:4px">Pro</span></div>
+      <div class="card">
+
+        <div class="field">
+          <div class="checkbox-row">
+            <input type="checkbox" id="priceDropEnabled" />
+            <label for="priceDropEnabled">Enable automatic price drop on relist</label>
+          </div>
+        </div>
+
+        <div class="field">
+          <div class="field-label">Drop Type</div>
+          <select id="priceDropType">
+            <option value="percent">Percentage (%)</option>
+            <option value="fixed">Fixed Amount ($)</option>
+          </select>
+        </div>
+
+        <div class="field">
+          <div class="field-label">Drop Value</div>
+          <div class="inline-row">
+            <input type="number" id="priceDropValue" min="0" step="0.01" placeholder="0" />
+            <span class="unit" id="drop-unit">%</span>
+          </div>
+        </div>
+
+        <div class="field">
+          <div class="field-label">Price Floor</div>
+          <div class="inline-row">
+            <input type="number" id="priceFloor" min="1" step="1" placeholder="1" />
+            <span class="unit">$</span>
+          </div>
+          <div class="field-hint">Never drop below this price (minimum: $1)</div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- Schedule Section -->
+    <div class="section" id="section-schedule">
+      <div class="section-title">Schedule <span style="font-size:9px;color:var(--amber);font-weight:700;text-transform:uppercase;letter-spacing:.06em;margin-left:4px">Pro</span></div>
+      <div class="card">
+
+        <div class="field">
+          <div class="checkbox-row">
+            <input type="checkbox" id="scheduleEnabled" />
+            <label for="scheduleEnabled">Enable scheduled auto-relist</label>
+          </div>
+        </div>
+
+        <div class="field">
+          <div class="field-label">Relist Every</div>
+          <div class="inline-row">
+            <input type="number" id="scheduleEveryHours" min="1" step="1" placeholder="24" />
+            <span class="unit">hours</span>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- Bulk Section -->
+    <div class="section">
+      <div class="section-title">Bulk Listing</div>
+      <div class="card">
+
+        <div class="field">
+          <div class="field-label">Delay Between Listings</div>
+          <div class="inline-row">
+            <input type="number" id="bulkDelaySec" min="1" step="1" placeholder="12" />
+            <span class="unit">seconds</span>
+          </div>
+          <div class="field-hint">Pause between each listing in a bulk relist run (default: 12s)</div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- Actions -->
+    <div class="actions">
+      <button class="btn-primary" id="btn-save">
+        <svg width="13" height="13" viewBox="0 0 20 20" fill="none">
+          <path d="M16.5 3.5H5a1.5 1.5 0 0 0-1.5 1.5v10A1.5 1.5 0 0 0 5 16.5h10a1.5 1.5 0 0 0 1.5-1.5V5l-2-1.5zm-6.5 10a2.5 2.5 0 1 1 0-5 2.5 2.5 0 0 1 0 5zm3-8.5H6v3h7V5z" fill="currentColor"/>
+        </svg>
+        Save Settings
+      </button>
+      <div id="status-msg"></div>
+    </div>
+
+  </div>
+
+  <div style="text-align:center;padding:16px 0 0;color:var(--muted);font-size:11px;">
+    <a id="opt-btn-feedback" href="#" style="color:var(--muted);text-decoration:none;">💬 Request a feature / Send feedback</a>
+  </div>
+
+  <script src="options.js"></script>
+</body>
+</html>
