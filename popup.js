@@ -2,6 +2,12 @@
 
 const FEATURE_REQUEST_URL = 'https://docs.google.com/forms/d/e/1FAIpQLSc78R_TngfIQdszSibKVsNnsKYJVyK0zqj2eg4bZ8K6rJylqA/viewform';
 
+// Version label — read from manifest so it never goes stale.
+try {
+  const _ver = document.getElementById('ver-label');
+  if (_ver) _ver.textContent = `v${chrome.runtime.getManifest().version} · API+AI+Condition`;
+} catch (_) {}
+
 // ── Element refs ──────────────────────────────────────────────────────────────
 
 const dot            = document.getElementById('dot');
