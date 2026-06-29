@@ -1,6 +1,6 @@
 'use strict';
 
-// content.js v3.7.3 — three-tier photo-map: DOM JSON scan → BG bridge → legacy API
+// content.js v3.7.10 — three-tier photo-map: DOM JSON scan → BG bridge → legacy API
 // Runs only on: /marketplace/you/selling*
 // Injects Relist buttons + multi-select checkboxes per listing card.
 // Floating action bar: Select All / Relist Selected (N) / Clear.
@@ -339,6 +339,61 @@ function lockRelistButton(btn) {
     }
   });
   btn.replaceWith(locked);
+}
+
+/**
+ * Restore a previously locked button to its normal Relist state.
+ * Mirror image of lockRelistButton: clones the node (drops locked listener),
+ * resets appearance, and re-attaches the two-click confirm + relist handler.
+ * Safe to call on a button that is already unlocked (no-op in that case).
+ */
+function unlockRelistButton(btn) {
+  const listingId = btn.dataset.listingId;
+  if (!listingId) return;
+
+  // Clone to strip the locked-click listener
+  const fresh = btn.cloneNode(true);
+  fresh.textContent      = 'Relist';
+  fresh.dataset.state    = '';
+  fresh.disabled         = false;
+  fresh.style.background = '#1877F2';
+  fresh.style.cursor     = 'pointer';
+  fresh.style.opacity    = '0.9';
+
+  // Re-attach the two-click confirm handler (same logic as injectButton)
+  let confirmTimer = null;
+  fresh.addEventListener('click', e => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (fresh.dataset.state === 'busy' || fresh.dataset.state === 'done') return;
+    if (fresh.dataset.confirm === '1') {
+      clearTimeout(confirmTimer);
+      fresh.dataset.confirm  = '';
+      fresh.style.background = '#1877F2';
+      relistItem(listingId, fresh);
+      return;
+    }
+    fresh.dataset.confirm  = '1';
+    fresh.textContent      = 'Confirm?';
+    fresh.style.background = '#D97706';
+    fresh.style.opacity    = '1';
+    confirmTimer = setTimeout(() => {
+      if (fresh.dataset.confirm === '1') {
+        fresh.dataset.confirm  = '';
+        fresh.textContent      = 'Relist';
+        fresh.style.background = '#1877F2';
+        fresh.style.opacity    = '0.9';
+      }
+    }, 3000);
+  });
+  fresh.addEventListener('mouseenter', () => {
+    if (!fresh.dataset.state && fresh.dataset.confirm !== '1') fresh.style.background = '#1668D6';
+  });
+  fresh.addEventListener('mouseleave', () => {
+    if (!fresh.dataset.state && fresh.dataset.confirm !== '1') fresh.style.background = '#1877F2';
+  });
+
+  btn.replaceWith(fresh);
 }
 
 function injectButton(card, listingId) {
@@ -686,9 +741,19 @@ function syncAllCheckboxes() {
 // ─── Free-tier gating ────────────────────────────────────────────────────────
 
 /**
- * After all cards are rendered, ask background for the ordered live-listing
- * IDs and lock any button whose listing sits at index ≥ 4 (free tier only).
- * Pro users: no-op (returns early after CHECK_PRO confirms isPro).
+ * After all cards are rendered, apply free-tier gating based on DISPLAY order.
+ *
+ * Free set = the FREE_LISTING_LIMIT (4) listing IDs that appear FIRST in the
+ * DOM anchor list (document order = FB's visual newest-first order).  Reading
+ * from the DOM directly means the free set matches exactly what the user sees
+ * as the "top 4" cards, regardless of what order the harvest/GraphQL tier
+ * returns IDs in.
+ *
+ * Gating is idempotent: each pass both locks over-limit listings AND unlocks
+ * listings that were locked in a previous pass but now belong to the free set
+ * (e.g. pass-1 used a stale/shorter list; pass-2 corrects it after harvest).
+ *
+ * Pro users: no-op (returns early).
  */
 async function applyFreeGating() {
   try {
@@ -696,16 +761,52 @@ async function applyFreeGating() {
     _isPro = !!(proRes && proRes.isPro);
     if (_isPro) { _lockedIds = new Set(); return; } // Pro — nothing locked
 
+    // ── Determine free set from injected-button DOM order ─────────────────
+    // FB renders listing cards in newest-first (CREATION_TIMESTAMP_DESC) order.
+    // Our injected buttons follow that same DOM order (scanByDOMLinks injects
+    // them in anchor document-order).  At scroll-position 0, FB virtualizes
+    // cards below the fold (removes their anchor elements), but our buttons
+    // persist because they are attached to higher-level container elements.
+    // Using button order is therefore more reliable than anchor order.
+    // The first FREE_LISTING_LIMIT distinct listing IDs in button DOM order are
+    // the "free" listings — they are the visually topmost cards.
+    const _seenDom  = new Set();
+    const _domOrderIds = [];
+    for (const b of document.querySelectorAll('.' + RELIST_CLASS)) {
+      const lid = b.dataset.listingId;
+      if (lid && !_seenDom.has(lid)) {
+        _seenDom.add(lid);
+        _domOrderIds.push(lid);
+      }
+    }
+    const _freeSet = new Set(_domOrderIds.slice(0, FREE_LISTING_LIMIT));
+
+    // ── Get full set of live IDs from background ───────────────────────────
     const liveRes = await chrome.runtime.sendMessage({ kind: 'GET_LIVE_IDS' });
     if (!liveRes || !liveRes.ok || !Array.isArray(liveRes.ids)) return;
 
-    _lockedIds = new Set(liveRes.ids.slice(FREE_LISTING_LIMIT)); // positions 4+ locked
-    // Re-gate any already-injected buttons (catch-up for cards injected before state was known)
+    // Everything NOT in the free set is locked
+    _lockedIds = new Set(liveRes.ids.filter(id => !_freeSet.has(id)));
+
+    // ── Idempotent re-gate of all rendered buttons ─────────────────────────
+    // Lock over-limit buttons; UNLOCK any that were previously locked but now
+    // belong to the free set (corrects pass-1 over-locking).
     for (const btn of document.querySelectorAll('.' + RELIST_CLASS)) {
       const lid = btn.dataset.listingId;
-      if (lid && _lockedIds.has(lid) && btn.dataset.state !== 'locked') lockRelistButton(btn);
+      if (!lid) continue;
+      const isLocked   = btn.dataset.state === 'locked';
+      const shouldLock = _lockedIds.has(lid);
+      if (shouldLock && !isLocked) {
+        lockRelistButton(btn);
+      } else if (!shouldLock && isLocked) {
+        unlockRelistButton(btn);
+      }
     }
-    console.log('[Relister v3] Free gating —', _lockedIds.size, 'listing(s) locked');
+
+    console.log(
+      '[Relister v3] Free gating — free set:', [..._freeSet],
+      '| locked:', _lockedIds.size, 'listing(s)'
+    );
   } catch (e) {
     console.warn('[Relister v3] applyFreeGating failed (no lock applied):', e.message);
   }
