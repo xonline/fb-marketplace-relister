@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Relist for Facebook Marketplace",
-  "version": "3.7.8",
+  "version": "3.7.9",
   "description": "Relist your Facebook Marketplace listings in one click — single, bulk or scheduled. Keeps photos, price, location & condition.",
   "permissions": [
     "storage",
@@ -26,6 +26,12 @@
     "service_worker": "background.js"
   },
   "content_scripts": [
+    {
+      "matches": ["*://www.facebook.com/marketplace/you/selling*"],
+      "js": ["harvest-inject.js"],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
     {
       "matches": ["*://www.facebook.com/marketplace/you/selling*"],
       "js": ["content.js"],
